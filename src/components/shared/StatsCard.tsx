@@ -13,6 +13,7 @@ interface StatsCardProps {
   };
   description?: string;
   color?: 'blue' | 'green' | 'amber' | 'purple' | 'primary' | 'success' | 'warning' | 'info';
+  onClick?: () => void;
 }
 
 export const StatsCard: React.FC<StatsCardProps> = ({
@@ -22,6 +23,7 @@ export const StatsCard: React.FC<StatsCardProps> = ({
   trend,
   description,
   color = 'blue',
+  onClick,
 }) => {
   const colorClasses = {
     blue: 'bg-blue-50 text-blue-600',
@@ -35,7 +37,7 @@ export const StatsCard: React.FC<StatsCardProps> = ({
   };
 
   return (
-    <Card hoverable>
+    <Card hoverable onClick={onClick} className={onClick ? 'cursor-pointer' : ''}>
       <CardContent className="p-5">
         <div className="flex items-start justify-between">
           <div>

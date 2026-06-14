@@ -32,7 +32,7 @@ import { useTemplateStore } from '@/store/useTemplateStore';
 import { usePropertyStore } from '@/store/usePropertyStore';
 import { useNightMode } from '@/hooks/useNightMode';
 import { useDeduplication } from '@/hooks/useDeduplication';
-import type { Conversation, SpecialNeedType } from '@/types/conversation';
+import type { Conversation, SpecialNeedType, StayStage } from '@/types/conversation';
 import { formatRelative } from '@/utils/date';
 import { renderTemplate } from '@/utils/template';
 
@@ -43,23 +43,35 @@ const Conversations: React.FC = () => {
     setSelectedConversationId,
     sendMessage,
     sendAutoReply,
+    smartAutoReply,
     toggleManualOverride,
     addSpecialNeed,
     removeSpecialNeed,
     markAsRead,
+    simulateNewInquiry,
   } = useConversationStore();
   const { templates, getTemplatesByCategory } = useTemplateStore();
-  const { getPropertyById } = usePropertyStore();
+  const { properties, getPropertyById } = usePropertyStore();
   const { isNightMode } = useNightMode();
   const { checkAndRecord, isDuplicate } = useDeduplication();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [channelFilter, setChannelFilter] = useState<string>('all');
+  const [stageFilter, setStageFilter] = useState<string>('all');
   const [newMessage, setNewMessage] = useState('');
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>('');
   const [showSpecialNeedModal, setShowSpecialNeedModal] = useState(false);
   const [specialNeedType, setSpecialNeedType] = useState<SpecialNeedType>('baby_crib');
   const [specialNeedDesc, setSpecialNeedDesc] = useState('');
+  const [showNewInquiryModal, setShowNewInquiryModal] = useState(false);
+  const [newInquiryData, setNewInquiryData] = useState({
+    channel: 'airbnb',
+    propertyId: 'p1',
+    guestName: '',
+    content: '',
+    stayStage: 'inquiry' as StayStage,
+  });
+  const [autoReplyToast, setAutoReplyToast] = useState<{ show: boolean; message: string; type: 'success' | 'warning' }>({ show: false, message: '', type: 'success' });
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const selectedConversation = conversations.find(c => c.id === selectedConversationId);
@@ -80,11 +92,27 @@ const Conversations: React.FC = () => {
     { type: 'pet_friendly', label: '宠物友好', icon: <PawPrint className="w-4 h-4" /> },
   ];
 
+  const stageLabels: Record<string, string> = {
+    all: '全部阶段',
+    inquiry: '咨询中',
+    pre_checkin: '入住前',
+    during_stay: '入住中',
+    post_checkout: '退房后',
+  };
+
+  const stageColors: Record<string, string> = {
+    inquiry: 'info',
+    pre_checkin: 'warning',
+    during_stay: 'success',
+    post_checkout: 'default',
+  };
+
   const filteredConversations = conversations.filter(c => {
     const matchesSearch = c.guest.name.includes(searchQuery) ||
       c.messages.some(m => m.content.includes(searchQuery));
     const matchesChannel = channelFilter === 'all' || c.channel === channelFilter;
-    return matchesSearch && matchesChannel;
+    const matchesStage = stageFilter === 'all' || c.stayStage === stageFilter;
+    return matchesSearch && matchesChannel && matchesStage;
   });
 
   const sortedConversations = [...filteredConversations].sort(
@@ -110,7 +138,7 @@ const Conversations: React.FC = () => {
     if (!selectedConversationId || !newMessage.trim()) return;
 
     const isRewritten = selectedTemplateId !== '';
-    sendMessage(selectedConversationId, newMessage, isRewritten);
+    sendMessage(selectedConversationId, newMessage, isRewritten, selectedTemplateId || undefined);
     setNewMessage('');
     setSelectedTemplateId('');
   };
@@ -141,31 +169,63 @@ const Conversations: React.FC = () => {
 
   const handleSendAutoReply = () => {
     if (!selectedConversation) return;
-    if (selectedConversation.manualOverride) {
-      alert('当前会话已被人工接管，无法发送自动回复');
-      return;
-    }
+    
+    const result = smartAutoReply(selectedConversation.id);
+    
+    setAutoReplyToast({
+      show: true,
+      message: result.success ? '智能回复已发送' : result.reason || '发送失败',
+      type: result.success ? 'success' : 'warning',
+    });
 
-    const dedupKey = `${selectedConversation.id}-auto-reply`;
-    if (isDuplicate(selectedConversation.id, 'auto-reply')) {
-      alert('24小时内已发送过自动回复，避免重复打扰客人');
-      return;
-    }
-
-    const template = isNightMode
-      ? templates.find(t => t.category === 'inquiry' && t.name.includes('深夜'))
-      : templates.find(t => t.category === 'inquiry');
-
-    if (template) {
-      const property = getPropertyById(selectedConversation.propertyId);
-      const data: Record<string, any> = {
-        客人姓名: selectedConversation.guest.name,
-        房源名称: property?.name || '',
-      };
-      sendAutoReply(selectedConversation.id, template.id, data);
-      checkAndRecord(selectedConversation.id, 'auto-reply');
-    }
+    setTimeout(() => {
+      setAutoReplyToast(prev => ({ ...prev, show: false }));
+    }, 3000);
   };
+
+  const handleSimulateNewInquiry = () => {
+    if (!newInquiryData.guestName.trim() || !newInquiryData.content.trim()) {
+      alert('请填写客人姓名和咨询内容');
+      return;
+    }
+
+    const newId = simulateNewInquiry(
+      newInquiryData.channel,
+      newInquiryData.propertyId,
+      newInquiryData.guestName,
+      newInquiryData.content,
+      newInquiryData.stayStage
+    );
+
+    setSelectedConversationId(newId);
+    setShowNewInquiryModal(false);
+    setNewInquiryData({
+      channel: 'airbnb',
+      propertyId: 'p1',
+      guestName: '',
+      content: '',
+      stayStage: 'inquiry',
+    });
+
+    setTimeout(() => {
+      setAutoReplyToast({
+        show: true,
+        message: '新咨询已创建，智能回复将自动触发',
+        type: 'success',
+      });
+      setTimeout(() => {
+        setAutoReplyToast(prev => ({ ...prev, show: false }));
+      }, 3000);
+    }, 800);
+  };
+
+  const stageFilterOptions = [
+    { value: 'all', label: '全部阶段' },
+    { value: 'inquiry', label: '咨询中' },
+    { value: 'pre_checkin', label: '入住前' },
+    { value: 'during_stay', label: '入住中' },
+    { value: 'post_checkout', label: '退房后' },
+  ];
 
   const handleAddSpecialNeed = () => {
     if (!selectedConversationId || !specialNeedDesc.trim()) return;
@@ -192,12 +252,21 @@ const Conversations: React.FC = () => {
           <div className="p-4 border-b border-gray-200 space-y-3">
             <div className="flex items-center justify-between">
               <h2 className="font-semibold text-gray-900">会话列表</h2>
-              {isNightMode && (
-                <Badge variant="warning" className="flex items-center gap-1">
-                  <Moon className="w-3 h-3" />
-                  深夜模式
-                </Badge>
-              )}
+              <div className="flex items-center gap-2">
+                {isNightMode && (
+                  <Badge variant="warning" className="flex items-center gap-1">
+                    <Moon className="w-3 h-3" />
+                    深夜
+                  </Badge>
+                )}
+                <Button
+                  size="sm"
+                  leftIcon={<Plus className="w-4 h-4" />}
+                  onClick={() => setShowNewInquiryModal(true)}
+                >
+                  模拟咨询
+                </Button>
+              </div>
             </div>
             <Input
               placeholder="搜索客人或消息..."
@@ -205,12 +274,20 @@ const Conversations: React.FC = () => {
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
-            <Dropdown
-              options={channelFilterOptions}
-              value={channelFilter}
-              onChange={setChannelFilter}
-              placeholder="选择渠道"
-            />
+            <div className="grid grid-cols-2 gap-2">
+              <Dropdown
+                options={channelFilterOptions}
+                value={channelFilter}
+                onChange={setChannelFilter}
+                placeholder="渠道筛选"
+              />
+              <Dropdown
+                options={stageFilterOptions}
+                value={stageFilter}
+                onChange={setStageFilter}
+                placeholder="阶段筛选"
+              />
+            </div>
           </div>
 
           <div className="flex-1 overflow-y-auto">
@@ -237,14 +314,17 @@ const Conversations: React.FC = () => {
                         {formatRelative(conversation.lastMessageAt)}
                       </span>
                     </div>
-                    <div className="flex items-center gap-2 mt-1">
+                    <div className="flex items-center gap-1 mt-1 flex-wrap">
                       <Tag variant="info" size="sm">
                         {channelLabels[conversation.channel]}
+                      </Tag>
+                      <Tag variant={stageColors[conversation.stayStage] as any} size="sm">
+                        {stageLabels[conversation.stayStage]}
                       </Tag>
                       {conversation.manualOverride && (
                         <Tag variant="warning" size="sm">
                           <Hand className="w-3 h-3 mr-1" />
-                          人工接管
+                          人工
                         </Tag>
                       )}
                     </div>
@@ -473,6 +553,100 @@ const Conversations: React.FC = () => {
               添加标记
             </Button>
           </div>
+        </div>
+      </div>
+
+      <div className={`fixed inset-0 z-50 flex items-center justify-center ${showNewInquiryModal ? '' : 'hidden'}`}>
+        <div className="absolute inset-0 bg-black/50" onClick={() => setShowNewInquiryModal(false)} />
+        <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-lg p-6">
+          <h3 className="text-lg font-semibold mb-4">模拟新咨询</h3>
+          <p className="text-sm text-gray-500 mb-4">选择不同的渠道、房源和入住阶段，测试智能回复效果</p>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">渠道</label>
+                <select
+                  value={newInquiryData.channel}
+                  onChange={(e) => setNewInquiryData(prev => ({ ...prev, channel: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#1e3a5f]/20 focus:border-[#1e3a5f]"
+                >
+                  {channelFilterOptions.filter(o => o.value !== 'all').map(option => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">入住阶段</label>
+                <select
+                  value={newInquiryData.stayStage}
+                  onChange={(e) => setNewInquiryData(prev => ({ ...prev, stayStage: e.target.value as StayStage }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#1e3a5f]/20 focus:border-[#1e3a5f]"
+                >
+                  {stageFilterOptions.filter(o => o.value !== 'all').map(option => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">房源</label>
+              <select
+                value={newInquiryData.propertyId}
+                onChange={(e) => setNewInquiryData(prev => ({ ...prev, propertyId: e.target.value }))}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#1e3a5f]/20 focus:border-[#1e3a5f]"
+              >
+                {properties.map(p => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">客人姓名</label>
+              <Input
+                value={newInquiryData.guestName}
+                onChange={(e) => setNewInquiryData(prev => ({ ...prev, guestName: e.target.value }))}
+                placeholder="请输入客人姓名"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">咨询内容</label>
+              <Textarea
+                value={newInquiryData.content}
+                onChange={(e) => setNewInquiryData(prev => ({ ...prev, content: e.target.value }))}
+                placeholder="请输入客人的咨询内容"
+                rows={3}
+              />
+            </div>
+            <div className="p-3 bg-blue-50 rounded-lg">
+              <p className="text-sm text-blue-700">
+                <span className="font-medium">提示：</span>
+                提交后系统将自动触发智能回复，您可以测试不同场景下的自动回复效果。
+                {isNightMode && <span className="ml-1 text-amber-600">（当前为深夜模式，将发送深夜简版回复）</span>}
+              </p>
+            </div>
+          </div>
+          <div className="flex justify-end gap-3 mt-6">
+            <Button variant="outline" onClick={() => setShowNewInquiryModal(false)}>
+              取消
+            </Button>
+            <Button
+              onClick={handleSimulateNewInquiry}
+              disabled={!newInquiryData.guestName.trim() || !newInquiryData.content.trim()}
+            >
+              发送咨询
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      <div className={`fixed top-20 left-1/2 -translate-x-1/2 z-50 transition-all duration-300 ${
+        autoReplyToast.show ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-4 pointer-events-none'
+      }`}>
+        <div className={`px-4 py-3 rounded-lg shadow-lg flex items-center gap-2 ${
+          autoReplyToast.type === 'success' ? 'bg-emerald-500 text-white' : 'bg-amber-500 text-white'
+        }`}>
+          <Zap className="w-4 h-4" />
+          <span className="text-sm font-medium">{autoReplyToast.message}</span>
         </div>
       </div>
     </MainLayout>

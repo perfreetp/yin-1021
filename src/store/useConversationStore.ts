@@ -1,23 +1,30 @@
 import { create } from 'zustand';
-import type { Conversation, Message, SpecialNeed, SpecialNeedType } from '../types/conversation';
+import type { Conversation, Message, SpecialNeed, SpecialNeedType, StayStage } from '../types/conversation';
 import { mockConversations } from '../mock/conversations';
 import { loadFromLocalStorage, saveToLocalStorage } from '../utils/storage';
 import { renderTemplate } from '../utils/template';
 import { useTemplateStore } from './useTemplateStore';
+import { usePropertyStore } from './usePropertyStore';
+import { isNightTime } from '../utils/date';
+import { shouldSendMessage, recordSentMessage } from '../utils/deduplication';
 
 interface ConversationState {
   conversations: Conversation[];
   selectedConversationId: string | null;
   setConversations: (conversations: Conversation[]) => void;
   setSelectedConversationId: (id: string | null) => void;
-  sendMessage: (conversationId: string, content: string, isRewritten?: boolean) => void;
+  sendMessage: (conversationId: string, content: string, isRewritten?: boolean, templateId?: string) => void;
   sendAutoReply: (conversationId: string, templateId: string, data: Record<string, any>) => void;
+  smartAutoReply: (conversationId: string) => { success: boolean; reason?: string };
   receiveMessage: (conversationId: string, content: string) => void;
+  simulateNewInquiry: (channel: string, propertyId: string, guestName: string, content: string, stayStage: StayStage) => string;
   toggleManualOverride: (conversationId: string) => void;
   addSpecialNeed: (conversationId: string, type: SpecialNeedType, description: string) => void;
   removeSpecialNeed: (conversationId: string, type: SpecialNeedType) => void;
   markAsRead: (conversationId: string) => void;
   getConversationById: (id: string) => Conversation | undefined;
+  getConversationsByProperty: (propertyId: string) => Conversation[];
+  getConversationsByStayStage: (stayStage: StayStage) => Conversation[];
   getUnreadCount: () => number;
 }
 
@@ -34,7 +41,7 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
   
   setSelectedConversationId: (id) => set({ selectedConversationId: id }),
   
-  sendMessage: (conversationId, content, isRewritten = false) => {
+  sendMessage: (conversationId, content, isRewritten = false, templateId?) => {
     const now = new Date();
     const newMessage: Message = {
       id: `m${Date.now()}`,
@@ -44,6 +51,7 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
       status: 'sent',
       sentAt: now,
       isRewritten,
+      templateId,
     };
     
     const conversations = get().conversations.map(c => {
@@ -58,6 +66,10 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
     
     set({ conversations });
     saveToLocalStorage(STORAGE_KEY, conversations);
+    
+    if (templateId && isRewritten) {
+      useTemplateStore.getState().incrementRewrite(templateId);
+    }
   },
   
   sendAutoReply: (conversationId, templateId, data) => {
@@ -88,6 +100,62 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
     set({ conversations });
     saveToLocalStorage(STORAGE_KEY, conversations);
     useTemplateStore.getState().incrementUsage(templateId);
+  },
+
+  smartAutoReply: (conversationId) => {
+    const conversation = get().getConversationById(conversationId);
+    if (!conversation) return { success: false, reason: '会话不存在' };
+
+    if (conversation.manualOverride) {
+      return { success: false, reason: '人工接管中，已暂停自动回复' };
+    }
+
+    const dedupKey = `${conversation.id}-${conversation.stayStage}`;
+    if (!shouldSendMessage(conversation.guestId, dedupKey)) {
+      return { success: false, reason: '24小时内已发送过该类型消息，避免重复打扰' };
+    }
+
+    const templates = useTemplateStore.getState().templates;
+    const property = usePropertyStore.getState().getPropertyById(conversation.propertyId);
+    const isNight = isNightTime();
+
+    let targetTemplate = null;
+    let category = conversation.stayStage as string;
+
+    if (isNight) {
+      targetTemplate = templates.find(t => t.category === 'inquiry' && t.name.includes('深夜'));
+      category = 'night_inquiry';
+    } else {
+      const categoryMap: Record<string, string> = {
+        'inquiry': 'inquiry',
+        'pre_checkin': 'pre_checkin',
+        'during_stay': 'during_stay',
+        'post_checkout': 'checkout_day',
+      };
+      const templateCategory = categoryMap[conversation.stayStage] || 'inquiry';
+      targetTemplate = templates.find(t => t.category === templateCategory);
+    }
+
+    if (!targetTemplate) {
+      return { success: false, reason: '未找到合适的模板' };
+    }
+
+    const data: Record<string, any> = {
+      客人姓名: conversation.guest.name,
+      房源名称: property?.name || '',
+      地址: property?.address || '',
+      入住日期: '2024-06-20',
+      退房日期: '2024-06-25',
+      门锁密码: property?.doorLock.password || '',
+      门锁设置说明: property?.doorLock.instructions || '',
+      最近地铁站: property?.transportInfo.nearestSubway || '',
+      wifi密码: property?.wifiPassword || '',
+    };
+
+    get().sendAutoReply(conversationId, targetTemplate.id, data);
+    recordSentMessage(conversation.guestId, dedupKey);
+
+    return { success: true };
   },
   
   receiveMessage: (conversationId, content) => {
@@ -160,6 +228,55 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
   },
   
   getConversationById: (id) => get().conversations.find(c => c.id === id),
-  
+
+  getConversationsByProperty: (propertyId) => get().conversations.filter(c => c.propertyId === propertyId),
+
+  getConversationsByStayStage: (stayStage) => get().conversations.filter(c => c.stayStage === stayStage),
+
+  simulateNewInquiry: (channel, propertyId, guestName, content, stayStage) => {
+    const now = new Date();
+    const newId = `conv${Date.now()}`;
+    const guestId = `g${Date.now()}`;
+
+    const guestMessage: Message = {
+      id: `m${Date.now()}`,
+      conversationId: newId,
+      senderType: 'guest',
+      content,
+      status: 'unread',
+      sentAt: now,
+    };
+
+    const newConversation: Conversation = {
+      id: newId,
+      guestId,
+      propertyId,
+      channel,
+      manualOverride: false,
+      lastMessageAt: now,
+      unreadCount: 1,
+      stayStage,
+      guest: {
+        id: guestId,
+        name: guestName,
+        phone: '',
+        platform: channel,
+      },
+      messages: [guestMessage],
+      specialNeeds: [],
+    };
+
+    const conversations = [newConversation, ...get().conversations];
+    set({ conversations });
+    saveToLocalStorage(STORAGE_KEY, conversations);
+
+    setTimeout(() => {
+      const result = get().smartAutoReply(newId);
+      console.log('智能回复结果:', result);
+    }, 500);
+
+    return newId;
+  },
+
   getUnreadCount: () => get().conversations.reduce((sum, c) => sum + c.unreadCount, 0),
 }));

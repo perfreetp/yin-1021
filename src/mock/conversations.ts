@@ -12,6 +12,7 @@ export const mockConversations: Conversation[] = [
     manualOverride: false,
     lastMessageAt: new Date(now.getTime() - 30 * 60 * 1000),
     unreadCount: 2,
+    stayStage: 'inquiry',
     guest: {
       id: 'g1',
       name: '张先生',
@@ -69,6 +70,7 @@ export const mockConversations: Conversation[] = [
     manualOverride: true,
     lastMessageAt: new Date(now.getTime() - 2 * 60 * 60 * 1000),
     unreadCount: 0,
+    stayStage: 'pre_checkin',
     guest: {
       id: 'g2',
       name: '李女士',
@@ -128,6 +130,7 @@ export const mockConversations: Conversation[] = [
     manualOverride: false,
     lastMessageAt: new Date(now.getTime() - 5 * 60 * 1000),
     unreadCount: 1,
+    stayStage: 'during_stay',
     guest: {
       id: 'g3',
       name: '小王同学',
@@ -166,6 +169,7 @@ export const mockConversations: Conversation[] = [
     manualOverride: false,
     lastMessageAt: new Date(now.getTime() - 23 * 60 * 60 * 1000),
     unreadCount: 0,
+    stayStage: 'during_stay',
     guest: {
       id: 'g4',
       name: '陈先生一家',
@@ -215,6 +219,7 @@ export const mockConversations: Conversation[] = [
     manualOverride: false,
     lastMessageAt: new Date(now.getTime() - 22 * 60 * 60 * 1000),
     unreadCount: 0,
+    stayStage: 'pre_checkin',
     guest: {
       id: 'g5',
       name: '刘总',
@@ -244,6 +249,7 @@ export const mockConversations: Conversation[] = [
     manualOverride: false,
     lastMessageAt: new Date(now.getTime() - 1 * 60 * 60 * 1000),
     unreadCount: 0,
+    stayStage: 'inquiry',
     guest: {
       id: 'g6',
       name: 'Sarah Johnson',

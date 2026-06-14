@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   BarChart,
   Bar,
@@ -26,6 +27,7 @@ import {
   BarChart3,
   PieChart as PieChartIcon,
   Download,
+  ChevronRight,
 } from 'lucide-react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { StatsCard } from '@/components/shared/StatsCard';
@@ -39,12 +41,13 @@ import { useAnalyticsStore } from '@/store/useAnalyticsStore';
 import { usePropertyStore } from '@/store/usePropertyStore';
 
 const Analytics: React.FC = () => {
+  const navigate = useNavigate();
   const {
-    templateStats,
-    messageStats,
-    dailyTrend,
-    responseEfficiency,
-    propertyHistory,
+    getTemplateStats,
+    getMessageStats,
+    getDailyTrend,
+    getResponseEfficiency,
+    getPropertyHistory,
     getTopRewrittenTemplates,
     getMostUsedTemplates,
     getAutoReplyRate,
@@ -54,12 +57,17 @@ const Analytics: React.FC = () => {
   } = useAnalyticsStore();
   const { properties } = usePropertyStore();
 
-  const [activeTab, setActiveTab] = useState('overview');
+  const [activeTab, setActiveTab] = React.useState('overview');
 
-  const topRewritten = getTopRewrittenTemplates(10);
-  const mostUsed = getMostUsedTemplates(5);
-  const autoReplyRate = getAutoReplyRate();
-  const avgResponseTime = getAverageResponseTime();
+  const templateStats = useMemo(() => getTemplateStats(), [getTemplateStats, propertyFilter]);
+  const messageStats = useMemo(() => getMessageStats(), [getMessageStats, propertyFilter]);
+  const dailyTrend = useMemo(() => getDailyTrend(30), [getDailyTrend, propertyFilter]);
+  const responseEfficiency = useMemo(() => getResponseEfficiency(30), [getResponseEfficiency, propertyFilter]);
+  const propertyHistory = useMemo(() => getPropertyHistory(30), [getPropertyHistory]);
+  const topRewritten = useMemo(() => getTopRewrittenTemplates(10), [getTopRewrittenTemplates]);
+  const mostUsed = useMemo(() => getMostUsedTemplates(5), [getMostUsedTemplates]);
+  const autoReplyRate = useMemo(() => getAutoReplyRate(), [getAutoReplyRate, propertyFilter]);
+  const avgResponseTime = useMemo(() => getAverageResponseTime(), [getAverageResponseTime, propertyFilter]);
 
   const propertyOptions = [
     { value: 'all', label: '全部房源' },
@@ -93,6 +101,10 @@ const Analytics: React.FC = () => {
   const formatResponseTime = (seconds: number) => {
     if (seconds < 60) return `${seconds}秒`;
     return `${Math.floor(seconds / 60)}分钟${seconds % 60}秒`;
+  };
+
+  const handleViewPropertyDetail = (propertyId: string) => {
+    navigate(`/properties/${propertyId}`);
   };
 
   return (
@@ -140,7 +152,7 @@ const Analytics: React.FC = () => {
           />
           <StatsCard
             title="已读率"
-            value={`${Math.round((messageStats.read / messageStats.totalSent) * 100)}%`}
+            value={`${messageStats.totalSent > 0 ? Math.round((messageStats.read / messageStats.totalSent) * 100) : 0}%`}
             icon={<CheckCircle className="w-5 h-5" />}
             color="warning"
           />
@@ -471,9 +483,13 @@ const Analytics: React.FC = () => {
                           </div>
                         </TableCell>
                         <TableCell>
-                          <Button size="sm" variant="outline">
-                            <Calendar className="w-4 h-4 mr-1" />
-                            查看历史
+                          <Button 
+                            size="sm" 
+                            variant="outline"
+                            onClick={() => handleViewPropertyDetail(history.propertyId)}
+                            rightIcon={<ChevronRight className="w-4 h-4" />}
+                          >
+                            查看详情
                           </Button>
                         </TableCell>
                       </TableRow>

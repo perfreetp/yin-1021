@@ -11,9 +11,10 @@ interface TemplateState {
   setTemplates: (templates: MessageTemplate[]) => void;
   setSelectedTemplateId: (id: string | null) => void;
   setCategoryFilter: (category: TemplateCategory) => void;
-  addTemplate: (template: Omit<MessageTemplate, 'id' | 'variables' | 'usageCount' | 'rewriteCount' | 'createdAt' | 'updatedAt' | 'versions'>) => void;
+  addTemplate: (template: Omit<MessageTemplate, 'id' | 'variables' | 'usageCount' | 'rewriteCount' | 'createdAt' | 'updatedAt' | 'versions'>) => string;
   updateTemplate: (id: string, updates: Partial<MessageTemplate>) => void;
   deleteTemplate: (id: string) => void;
+  restoreVersion: (templateId: string, versionId: string) => void;
   incrementUsage: (id: string) => void;
   incrementRewrite: (id: string) => void;
   getTemplateById: (id: string) => MessageTemplate | undefined;
@@ -38,9 +39,10 @@ export const useTemplateStore = create<TemplateState>((set, get) => ({
   
   addTemplate: (template) => {
     const now = new Date();
+    const newId = `t${Date.now()}`;
     const newTemplate: MessageTemplate = {
       ...template,
-      id: `t${Date.now()}`,
+      id: newId,
       variables: extractVariables(template.content),
       usageCount: 0,
       rewriteCount: 0,
@@ -51,6 +53,7 @@ export const useTemplateStore = create<TemplateState>((set, get) => ({
     const templates = [...get().templates, newTemplate];
     set({ templates });
     saveToLocalStorage(STORAGE_KEY, templates);
+    return newId;
   },
   
   updateTemplate: (id, updates) => {
@@ -79,6 +82,31 @@ export const useTemplateStore = create<TemplateState>((set, get) => ({
   
   deleteTemplate: (id) => {
     const templates = get().templates.filter(t => t.id !== id);
+    set({ templates });
+    saveToLocalStorage(STORAGE_KEY, templates);
+  },
+
+  restoreVersion: (templateId, versionId) => {
+    const templates = get().templates.map(t => {
+      if (t.id !== templateId) return t;
+      const version = t.versions.find(v => v.id === versionId);
+      if (!version) return t;
+      return {
+        ...t,
+        content: version.content,
+        variables: extractVariables(version.content),
+        updatedAt: new Date(),
+        versions: [
+          ...t.versions,
+          {
+            id: `v${Date.now()}`,
+            content: t.content,
+            createdAt: t.updatedAt,
+            createdBy: '房东',
+          },
+        ],
+      };
+    });
     set({ templates });
     saveToLocalStorage(STORAGE_KEY, templates);
   },

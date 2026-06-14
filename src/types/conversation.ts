@@ -36,6 +36,8 @@ export interface Message {
   isRewritten?: boolean;
 }
 
+export type StayStage = 'inquiry' | 'pre_checkin' | 'during_stay' | 'post_checkout';
+
 export interface Conversation {
   id: string;
   guestId: string;
@@ -45,6 +47,7 @@ export interface Conversation {
   manualOverride: boolean;
   lastMessageAt: Date;
   unreadCount: number;
+  stayStage: StayStage;
   guest: Guest;
   messages: Message[];
   specialNeeds: SpecialNeed[];

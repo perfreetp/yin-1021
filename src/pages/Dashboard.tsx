@@ -1,4 +1,5 @@
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   BarChart,
   Bar,
@@ -48,10 +49,11 @@ import type { SpecialNeedType } from '@/types/conversation';
 import { formatRelative } from '@/utils/date';
 
 const Dashboard: React.FC = () => {
+  const navigate = useNavigate();
   const { conversations, getUnreadCount } = useConversationStore();
   const { bookings, getUpcomingBookings, scheduleLogs } = useScheduleStore();
   const { tasks, getTasksByStatus } = useCleaningStore();
-  const { getTopRewrittenTemplates, getAutoReplyRate, getAverageResponseTime, dailyTrend } = useAnalyticsStore();
+  const { getTopRewrittenTemplates, getAutoReplyRate, getAverageResponseTime, getDailyTrend } = useAnalyticsStore();
   const { properties } = usePropertyStore();
   const { templates } = useTemplateStore();
   const { isNightMode } = useNightMode();
@@ -61,6 +63,7 @@ const Dashboard: React.FC = () => {
   const autoReplyRate = getAutoReplyRate();
   const avgResponseTime = getAverageResponseTime();
   const topRewritten = getTopRewrittenTemplates(3);
+  const dailyTrend = getDailyTrend(7);
 
   const pendingTasks = getTasksByStatus('pending');
   const inProgressTasks = getTasksByStatus('in_progress');
@@ -107,6 +110,46 @@ const Dashboard: React.FC = () => {
 
   const getPropertyById = (id: string) => properties.find(p => p.id === id);
 
+  const handleQuickAction = (path: string) => {
+    navigate(path);
+  };
+
+  const handleViewConversation = (conversationId: string) => {
+    navigate('/conversations', { state: { conversationId } });
+  };
+
+  const handleViewAllConversations = () => {
+    navigate('/conversations');
+  };
+
+  const handleViewAllTemplates = () => {
+    navigate('/templates');
+  };
+
+  const handleViewAllProperties = () => {
+    navigate('/properties');
+  };
+
+  const handleViewPropertyDetail = (propertyId: string) => {
+    navigate(`/properties/${propertyId}`);
+  };
+
+  const handleViewSchedule = () => {
+    navigate('/schedule');
+  };
+
+  const handleViewCleaning = () => {
+    navigate('/cleaning');
+  };
+
+  const handleViewAnalytics = () => {
+    navigate('/analytics');
+  };
+
+  const handleOptimizeTemplates = () => {
+    navigate('/templates');
+  };
+
   return (
     <MainLayout>
       <div className="space-y-6">
@@ -130,6 +173,7 @@ const Dashboard: React.FC = () => {
             icon={<MessageSquare className="w-5 h-5" />}
             color="warning"
             description={`共 ${conversations.length} 个会话`}
+            onClick={() => handleViewAllConversations()}
           />
           <StatsCard
             title="当前在住"
@@ -137,6 +181,7 @@ const Dashboard: React.FC = () => {
             icon={<Users className="w-5 h-5" />}
             color="success"
             description={`即将入住 ${upcomingBookings.length} 单`}
+            onClick={() => handleViewSchedule()}
           />
           <StatsCard
             title="自动回复率"
@@ -144,6 +189,7 @@ const Dashboard: React.FC = () => {
             icon={<Zap className="w-5 h-5" />}
             color="primary"
             trend={{ value: 5, isUp: true }}
+            onClick={() => handleViewAnalytics()}
           />
           <StatsCard
             title="平均响应"
@@ -151,6 +197,7 @@ const Dashboard: React.FC = () => {
             icon={<Clock className="w-5 h-5" />}
             color="info"
             trend={{ value: 15, isUp: false }}
+            onClick={() => handleViewAnalytics()}
           />
         </div>
 
@@ -158,14 +205,14 @@ const Dashboard: React.FC = () => {
           <Card className="md:col-span-2">
             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle>近7天消息趋势</CardTitle>
-              <Button variant="ghost" size="sm" rightIcon={<ChevronRight className="w-4 h-4" />}>
+              <Button variant="ghost" size="sm" onClick={handleViewAnalytics} rightIcon={<ChevronRight className="w-4 h-4" />}>
                 查看详情
               </Button>
             </CardHeader>
             <CardContent>
               <div className="h-64">
                 <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={dailyTrend.slice(-7)}>
+                  <AreaChart data={dailyTrend}>
                     <defs>
                       <linearGradient id="colorAuto" x1="0" y1="0" x2="0" y2="1">
                         <stop offset="5%" stopColor="#1e3a5f" stopOpacity={0.3} />
@@ -211,6 +258,7 @@ const Dashboard: React.FC = () => {
                 {quickActions.map((action, idx) => (
                   <button
                     key={idx}
+                    onClick={() => handleQuickAction(action.path)}
                     className="flex flex-col items-center gap-2 p-4 border border-gray-200 rounded-lg hover:border-[#1e3a5f] hover:bg-[#1e3a5f]/5 transition-all group"
                   >
                     <div className={`p-2 rounded-lg ${
@@ -239,7 +287,10 @@ const Dashboard: React.FC = () => {
             </CardHeader>
             <CardContent className="space-y-3">
               {pendingTasks.length > 0 && (
-                <div className="flex items-center justify-between p-3 bg-amber-50 rounded-lg">
+                <div 
+                  className="flex items-center justify-between p-3 bg-amber-50 rounded-lg cursor-pointer hover:bg-amber-100 transition-colors"
+                  onClick={handleViewCleaning}
+                >
                   <div className="flex items-center gap-3">
                     <Sparkles className="w-5 h-5 text-amber-600" />
                     <div>
@@ -251,7 +302,10 @@ const Dashboard: React.FC = () => {
                 </div>
               )}
               {inProgressTasks.length > 0 && (
-                <div className="flex items-center justify-between p-3 bg-blue-50 rounded-lg">
+                <div 
+                  className="flex items-center justify-between p-3 bg-blue-50 rounded-lg cursor-pointer hover:bg-blue-100 transition-colors"
+                  onClick={handleViewCleaning}
+                >
                   <div className="flex items-center gap-3">
                     <Clock className="w-5 h-5 text-blue-600" />
                     <div>
@@ -263,7 +317,10 @@ const Dashboard: React.FC = () => {
                 </div>
               )}
               {pendingMessages > 0 && (
-                <div className="flex items-center justify-between p-3 bg-emerald-50 rounded-lg">
+                <div 
+                  className="flex items-center justify-between p-3 bg-emerald-50 rounded-lg cursor-pointer hover:bg-emerald-100 transition-colors"
+                  onClick={handleViewSchedule}
+                >
                   <div className="flex items-center gap-3">
                     <Zap className="w-5 h-5 text-emerald-600" />
                     <div>
@@ -275,7 +332,10 @@ const Dashboard: React.FC = () => {
                 </div>
               )}
               {unreadCount > 0 && (
-                <div className="flex items-center justify-between p-3 bg-red-50 rounded-lg">
+                <div 
+                  className="flex items-center justify-between p-3 bg-red-50 rounded-lg cursor-pointer hover:bg-red-100 transition-colors"
+                  onClick={handleViewAllConversations}
+                >
                   <div className="flex items-center gap-3">
                     <MessageSquare className="w-5 h-5 text-red-600" />
                     <div>
@@ -298,7 +358,7 @@ const Dashboard: React.FC = () => {
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle>最近会话</CardTitle>
-              <Button variant="ghost" size="sm" rightIcon={<ChevronRight className="w-4 h-4" />}>
+              <Button variant="ghost" size="sm" onClick={handleViewAllConversations} rightIcon={<ChevronRight className="w-4 h-4" />}>
                 全部
               </Button>
             </CardHeader>
@@ -308,6 +368,7 @@ const Dashboard: React.FC = () => {
                 return (
                   <div
                     key={conv.id}
+                    onClick={() => handleViewConversation(conv.id)}
                     className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 cursor-pointer transition-colors"
                   >
                     <Avatar size="md" />
@@ -352,6 +413,7 @@ const Dashboard: React.FC = () => {
                   return (
                     <div
                       key={booking.id}
+                      onClick={handleViewSchedule}
                       className="p-3 border border-gray-200 rounded-lg hover:border-[#1e3a5f] cursor-pointer transition-colors"
                     >
                       <div className="flex items-center justify-between mb-2">
@@ -392,7 +454,7 @@ const Dashboard: React.FC = () => {
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle>需要优化的模板</CardTitle>
-              <Button variant="ghost" size="sm" rightIcon={<ChevronRight className="w-4 h-4" />}>
+              <Button variant="ghost" size="sm" onClick={handleViewAllTemplates} rightIcon={<ChevronRight className="w-4 h-4" />}>
                 全部模板
               </Button>
             </CardHeader>
@@ -400,7 +462,11 @@ const Dashboard: React.FC = () => {
               {topRewritten.map(stat => {
                 const template = templates.find(t => t.id === stat.templateId);
                 return (
-                  <div key={stat.templateId} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                  <div 
+                    key={stat.templateId} 
+                    className="flex items-center justify-between p-3 bg-gray-50 rounded-lg cursor-pointer hover:bg-gray-100 transition-colors"
+                    onClick={handleViewAllTemplates}
+                  >
                     <div className="flex-1">
                       <div className="flex items-center gap-2">
                         <span className="font-medium text-sm">{stat.templateName}</span>
@@ -424,7 +490,7 @@ const Dashboard: React.FC = () => {
                   </div>
                 );
               })}
-              <Button variant="outline" className="w-full mt-2" rightIcon={<ArrowRight className="w-4 h-4" />}>
+              <Button variant="outline" className="w-full mt-2" onClick={handleOptimizeTemplates} rightIcon={<ArrowRight className="w-4 h-4" />}>
                 优化模板
               </Button>
             </CardContent>
@@ -433,7 +499,7 @@ const Dashboard: React.FC = () => {
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle>房源概览</CardTitle>
-              <Button variant="ghost" size="sm" rightIcon={<ChevronRight className="w-4 h-4" />}>
+              <Button variant="ghost" size="sm" onClick={handleViewAllProperties} rightIcon={<ChevronRight className="w-4 h-4" />}>
                 管理
               </Button>
             </CardHeader>
@@ -441,6 +507,7 @@ const Dashboard: React.FC = () => {
               {properties.slice(0, 4).map(property => (
                 <div
                   key={property.id}
+                  onClick={() => handleViewPropertyDetail(property.id)}
                   className="flex items-center gap-4 p-3 rounded-lg hover:bg-gray-50 cursor-pointer transition-colors"
                 >
                   <img

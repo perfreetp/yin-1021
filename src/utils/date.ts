@@ -60,3 +60,10 @@ export function isSameDate(date1: Date | string, date2: Date | string): boolean 
   const d2 = typeof date2 === 'string' ? new Date(date2) : date2;
   return isSameDay(d1, d2);
 }
+
+export function isWithinDays(date: Date | string, days: number): boolean {
+  const d = typeof date === 'string' ? new Date(date) : date;
+  const now = new Date();
+  const diff = differenceInDays(now, d);
+  return diff >= 0 && diff < days;
+}
