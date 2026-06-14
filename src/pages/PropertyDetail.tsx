@@ -163,7 +163,13 @@ const PropertyDetail: React.FC = () => {
   };
 
   const handleViewConversation = (conversationId: string) => {
-    navigate(`/conversations`, { state: { conversationId } });
+    navigate('/conversations', {
+      state: {
+        conversationId,
+        channelFilter,
+        stageFilter,
+      },
+    });
   };
 
   if (!property) {

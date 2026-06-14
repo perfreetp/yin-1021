@@ -107,6 +107,10 @@ const Analytics: React.FC = () => {
     navigate(`/properties/${propertyId}`);
   };
 
+  const handleViewPropertyConversations = (propertyId: string) => {
+    navigate('/conversations', { state: { propertyFilter: propertyId } });
+  };
+
   return (
     <MainLayout>
       <div className="space-y-6">
@@ -128,7 +132,7 @@ const Analytics: React.FC = () => {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
           <StatsCard
             title="总发送消息"
             value={messageStats.totalSent}
@@ -137,24 +141,31 @@ const Analytics: React.FC = () => {
             color="primary"
           />
           <StatsCard
-            title="自动回复率"
-            value={`${Math.round(autoReplyRate * 100)}%`}
-            icon={<Zap className="w-5 h-5" />}
-            trend={{ value: 5, isUp: true }}
+            title="送达率"
+            value={`${messageStats.totalSent > 0 ? Math.round((messageStats.delivered / messageStats.totalSent) * 100) : 0}%`}
+            icon={<CheckCircle className="w-5 h-5" />}
+            trend={{ value: 2, isUp: true }}
             color="success"
-          />
-          <StatsCard
-            title="平均响应时间"
-            value={formatResponseTime(avgResponseTime)}
-            icon={<Clock className="w-5 h-5" />}
-            trend={{ value: 15, isUp: false }}
-            color="info"
           />
           <StatsCard
             title="已读率"
             value={`${messageStats.totalSent > 0 ? Math.round((messageStats.read / messageStats.totalSent) * 100) : 0}%`}
             icon={<CheckCircle className="w-5 h-5" />}
             color="warning"
+          />
+          <StatsCard
+            title="自动回复率"
+            value={`${Math.round(autoReplyRate * 100)}%`}
+            icon={<Zap className="w-5 h-5" />}
+            trend={{ value: 5, isUp: true }}
+            color="info"
+          />
+          <StatsCard
+            title="平均响应时间"
+            value={formatResponseTime(avgResponseTime)}
+            icon={<Clock className="w-5 h-5" />}
+            trend={{ value: 15, isUp: false }}
+            color="primary"
           />
         </div>
 
@@ -483,14 +494,24 @@ const Analytics: React.FC = () => {
                           </div>
                         </TableCell>
                         <TableCell>
-                          <Button 
-                            size="sm" 
-                            variant="outline"
-                            onClick={() => handleViewPropertyDetail(history.propertyId)}
-                            rightIcon={<ChevronRight className="w-4 h-4" />}
-                          >
-                            查看详情
-                          </Button>
+                          <div className="flex gap-2">
+                            <Button 
+                              size="sm" 
+                              variant="outline"
+                              onClick={() => handleViewPropertyConversations(history.propertyId)}
+                              leftIcon={<MessageSquare className="w-3.5 h-3.5" />}
+                            >
+                              查看会话
+                            </Button>
+                            <Button 
+                              size="sm" 
+                              variant="ghost"
+                              onClick={() => handleViewPropertyDetail(history.propertyId)}
+                              rightIcon={<ChevronRight className="w-3.5 h-3.5" />}
+                            >
+                              房源详情
+                            </Button>
+                          </div>
                         </TableCell>
                       </TableRow>
                     ))}

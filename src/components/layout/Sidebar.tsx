@@ -9,9 +9,11 @@ import {
   Sparkles,
   BarChart3,
   MessageSquare,
+  Target,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useConversationStore } from '@/store/useConversationStore';
+import { useRuleStore } from '@/store/useRuleStore';
 
 interface NavItem {
   path: string;
@@ -23,11 +25,13 @@ interface NavItem {
 export const Sidebar: React.FC = () => {
   const location = useLocation();
   const unreadCount = useConversationStore(state => state.getUnreadCount());
+  const activeRuleCount = useRuleStore(state => state.rules.filter(r => r.enabled).length);
 
   const navItems: NavItem[] = [
     { path: '/dashboard', label: '控制台', icon: <LayoutDashboard className="w-5 h-5" /> },
     { path: '/properties', label: '房源规则', icon: <Building2 className="w-5 h-5" /> },
     { path: '/templates', label: '消息模板', icon: <MessageSquareText className="w-5 h-5" /> },
+    { path: '/rules', label: '规则中心', icon: <Target className="w-5 h-5" />, badge: activeRuleCount },
     { path: '/conversations', label: '会话汇总', icon: <MessageCircle className="w-5 h-5" />, badge: unreadCount },
     { path: '/schedule', label: '日程触发', icon: <Calendar className="w-5 h-5" /> },
     { path: '/cleaning', label: '保洁协同', icon: <Sparkles className="w-5 h-5" /> },

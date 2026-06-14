@@ -32,7 +32,9 @@ export interface Message {
   templateId?: string;
   status: MessageStatus;
   sentAt: Date;
+  deliveredAt?: Date;
   readAt?: Date;
+  failedAt?: Date;
   isRewritten?: boolean;
 }
 

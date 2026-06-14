@@ -7,6 +7,7 @@ import Conversations from "@/pages/Conversations";
 import Schedule from "@/pages/Schedule";
 import Cleaning from "@/pages/Cleaning";
 import Analytics from "@/pages/Analytics";
+import RuleCenter from "@/pages/RuleCenter";
 
 export default function App() {
   return (
@@ -18,6 +19,7 @@ export default function App() {
         <Route path="/properties/:id" element={<PropertyDetail />} />
         <Route path="/templates" element={<Templates />} />
         <Route path="/conversations" element={<Conversations />} />
+        <Route path="/rules" element={<RuleCenter />} />
         <Route path="/schedule" element={<Schedule />} />
         <Route path="/cleaning" element={<Cleaning />} />
         <Route path="/analytics" element={<Analytics />} />
