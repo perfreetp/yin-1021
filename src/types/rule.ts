@@ -1,5 +1,47 @@
 import type { StayStage } from './conversation';
 
+export type ObservationMetric = 'deliveryRate' | 'readRate' | 'followUpRate' | 'responseTime';
+
+export interface ObservationTarget {
+  metrics: ObservationMetric[];
+  comparisonRuleIds: string[];
+  startDate?: Date;
+  endDate?: Date;
+}
+
+export interface RulePerformance {
+  ruleId: string;
+  periodStart: Date;
+  periodEnd: Date;
+  hitCount: number;
+  deliveryCount: number;
+  readCount: number;
+  followUpCount: number;
+  avgResponseTime: number;
+}
+
+export type RuleHitEventType = 'matched' | 'skipped_priority' | 'skipped_dedup' | 'skipped_manual' | 'no_match' | 'restored_auto';
+
+export interface RuleHitEvent {
+  id: string;
+  conversationId: string;
+  guestId: string;
+  eventType: RuleHitEventType;
+  ruleId?: string;
+  ruleName?: string;
+  priority?: number;
+  hitExplanation?: string;
+  reasons: string[];
+  competingRules?: {
+    ruleId: string;
+    ruleName: string;
+    priority: number;
+    hitExplanation: string;
+  }[];
+  dedupKey?: string;
+  timestamp: Date;
+}
+
 export interface AutoReplyRule {
   id: string;
   name: string;
@@ -9,6 +51,8 @@ export interface AutoReplyRule {
   conditions: RuleConditions;
   action: RuleAction;
   hitExplanation: string;
+  observationTarget?: ObservationTarget;
+  performance?: RulePerformance[];
   createdAt: Date;
   updatedAt: Date;
   hitCount: number;

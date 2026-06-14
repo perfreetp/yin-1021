@@ -1,6 +1,22 @@
 import type { AutoReplyRule } from '../types/rule';
 
 const now = new Date();
+const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+function generatePerformance(ruleId: string, hitCount: number): AutoReplyRule['performance'] {
+  return [
+    {
+      ruleId,
+      periodStart: thirtyDaysAgo,
+      periodEnd: now,
+      hitCount,
+      deliveryCount: Math.round(hitCount * 0.97),
+      readCount: Math.round(hitCount * 0.82),
+      followUpCount: Math.round(hitCount * 0.35),
+      avgResponseTime: 45 + Math.floor(Math.random() * 30),
+    },
+  ];
+}
 
 export const mockRules: AutoReplyRule[] = [
   {
@@ -22,6 +38,11 @@ export const mockRules: AutoReplyRule[] = [
       templateName: '深夜咨询简版回复',
     },
     hitExplanation: '当前处于深夜时段（22:00-08:00），优先发送简版回复',
+    observationTarget: {
+      metrics: ['deliveryRate', 'readRate', 'responseTime'],
+      comparisonRuleIds: ['r8'],
+    },
+    performance: generatePerformance('r1', 34),
     createdAt: new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000),
     updatedAt: new Date(now.getTime() - 15 * 24 * 60 * 60 * 1000),
     hitCount: 34,
@@ -45,6 +66,11 @@ export const mockRules: AutoReplyRule[] = [
       templateName: '咨询自动回复',
     },
     hitExplanation: '匹配：Airbnb渠道 + 外滩景观公寓 + 咨询阶段',
+    observationTarget: {
+      metrics: ['deliveryRate', 'readRate', 'followUpRate', 'responseTime'],
+      comparisonRuleIds: ['r8', 'r5'],
+    },
+    performance: generatePerformance('r2', 58),
     createdAt: new Date(now.getTime() - 25 * 24 * 60 * 60 * 1000),
     updatedAt: new Date(now.getTime() - 10 * 24 * 60 * 60 * 1000),
     hitCount: 58,
@@ -68,6 +94,11 @@ export const mockRules: AutoReplyRule[] = [
       templateName: '入住前1天提醒',
     },
     hitExplanation: '匹配：携程渠道 + 入住前阶段',
+    observationTarget: {
+      metrics: ['deliveryRate', 'readRate'],
+      comparisonRuleIds: ['r7'],
+    },
+    performance: generatePerformance('r3', 42),
     createdAt: new Date(now.getTime() - 20 * 24 * 60 * 60 * 1000),
     updatedAt: new Date(now.getTime() - 8 * 24 * 60 * 60 * 1000),
     hitCount: 42,
@@ -91,6 +122,11 @@ export const mockRules: AutoReplyRule[] = [
       templateName: '入住中关怀',
     },
     hitExplanation: '匹配：美团渠道 + 静安精品公寓 + 入住中阶段',
+    observationTarget: {
+      metrics: ['readRate', 'followUpRate'],
+      comparisonRuleIds: [],
+    },
+    performance: generatePerformance('r4', 28),
     createdAt: new Date(now.getTime() - 18 * 24 * 60 * 60 * 1000),
     updatedAt: new Date(now.getTime() - 5 * 24 * 60 * 60 * 1000),
     hitCount: 28,
@@ -114,6 +150,11 @@ export const mockRules: AutoReplyRule[] = [
       templateName: '长租优惠咨询',
     },
     hitExplanation: '匹配：小红书渠道 + 咨询阶段',
+    observationTarget: {
+      metrics: ['readRate', 'followUpRate', 'responseTime'],
+      comparisonRuleIds: ['r2', 'r8'],
+    },
+    performance: generatePerformance('r5', 19),
     createdAt: new Date(now.getTime() - 12 * 24 * 60 * 60 * 1000),
     updatedAt: new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000),
     hitCount: 19,
@@ -137,6 +178,11 @@ export const mockRules: AutoReplyRule[] = [
       templateName: '退房当天确认',
     },
     hitExplanation: '匹配：退房后阶段（通用规则）',
+    observationTarget: {
+      metrics: ['deliveryRate', 'readRate'],
+      comparisonRuleIds: [],
+    },
+    performance: generatePerformance('r6', 52),
     createdAt: new Date(now.getTime() - 15 * 24 * 60 * 60 * 1000),
     updatedAt: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000),
     hitCount: 52,
@@ -160,6 +206,11 @@ export const mockRules: AutoReplyRule[] = [
       templateName: '入住当天欢迎',
     },
     hitExplanation: '匹配：入住前阶段（通用规则，优先级低于渠道专属规则）',
+    observationTarget: {
+      metrics: ['readRate', 'followUpRate'],
+      comparisonRuleIds: ['r3'],
+    },
+    performance: generatePerformance('r7', 38),
     createdAt: new Date(now.getTime() - 22 * 24 * 60 * 60 * 1000),
     updatedAt: new Date(now.getTime() - 9 * 24 * 60 * 60 * 1000),
     hitCount: 38,
@@ -183,6 +234,11 @@ export const mockRules: AutoReplyRule[] = [
       templateName: '咨询自动回复',
     },
     hitExplanation: '匹配：咨询阶段（最低优先级兜底规则）',
+    observationTarget: {
+      metrics: ['deliveryRate', 'readRate', 'followUpRate', 'responseTime'],
+      comparisonRuleIds: ['r2', 'r5'],
+    },
+    performance: generatePerformance('r8', 87),
     createdAt: new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000),
     updatedAt: new Date(now.getTime() - 12 * 24 * 60 * 60 * 1000),
     hitCount: 87,

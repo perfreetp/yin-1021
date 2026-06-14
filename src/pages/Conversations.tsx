@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Send,
@@ -25,10 +25,16 @@ import {
   ChevronRight,
   RotateCcw,
   Layers,
+  History,
+  Play,
+  CheckCircle,
+  XCircle,
+  Shield,
+  Gauge,
 } from 'lucide-react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Button } from '@/components/ui/Button';
-import { Card, CardContent } from '@/components/ui/Card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Input, Textarea } from '@/components/ui/Input';
 import { Tag } from '@/components/ui/Tag';
 import { Badge } from '@/components/ui/Badge';
@@ -37,13 +43,15 @@ import { Avatar } from '@/components/ui/Avatar';
 import { Dropdown } from '@/components/ui/Dropdown';
 import { Modal } from '@/components/ui/Modal';
 import { MessageBubble } from '@/components/shared/MessageBubble';
-import { useConversationStore, SmartAutoReplyResult } from '@/store/useConversationStore';
+import { useConversationStore, SmartAutoReplyResult, ScenarioType } from '@/store/useConversationStore';
 import { useTemplateStore } from '@/store/useTemplateStore';
 import { usePropertyStore } from '@/store/usePropertyStore';
+import { useRuleStore } from '@/store/useRuleStore';
 import { useNightMode } from '@/hooks/useNightMode';
 import { useDeduplication } from '@/hooks/useDeduplication';
 import type { Conversation, SpecialNeedType, StayStage } from '@/types/conversation';
-import { formatRelative } from '@/utils/date';
+import type { RuleHitEvent, RuleHitEventType } from '@/types/rule';
+import { formatRelative, formatDateTime } from '@/utils/date';
 import { renderTemplate } from '@/utils/template';
 
 const Conversations: React.FC = () => {
@@ -65,9 +73,11 @@ const Conversations: React.FC = () => {
     simulateGuestReply,
     getConversationsByGuestId,
     lastAutoReplyResult,
+    simulateScenario,
   } = useConversationStore();
   const { templates, getTemplatesByCategory } = useTemplateStore();
   const { properties, getPropertyById } = usePropertyStore();
+  const { getHitEventsByConversationId, getHitEventsByGuestId, ruleHitEvents } = useRuleStore();
   const { isNightMode } = useNightMode();
   const { checkAndRecord, isDuplicate } = useDeduplication();
 
@@ -355,7 +365,7 @@ const Conversations: React.FC = () => {
       </div>
 
       <div className="flex h-[calc(100vh-220px)] bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <div className="w-80 border-r border-gray-200 flex flex-col">
+        <div className="w-80 border-r border-gray-200 flex flex-col flex-shrink-0">
           <div className="p-4 border-b border-gray-200 space-y-3">
             <div className="flex items-center justify-between">
               <h2 className="font-semibold text-gray-900">会话列表</h2>
@@ -373,6 +383,22 @@ const Conversations: React.FC = () => {
                 >
                   模拟咨询
                 </Button>
+                <Dropdown
+                  options={[
+                    { value: 'cross_channel', label: '跨渠道追问' },
+                    { value: 'delayed_followup', label: '间隔追问' },
+                    { value: 'manual_switch', label: '人工切自动' },
+                    { value: 'dedup_test', label: '去重测试' },
+                  ]}
+                  value=""
+                  onChange={(v) => {
+                    if (v) {
+                      simulateScenario(v as ScenarioType);
+                    }
+                  }}
+                  placeholder="一键场景"
+                  className="w-32"
+                />
               </div>
             </div>
             <Input
@@ -687,6 +713,40 @@ const Conversations: React.FC = () => {
               </Card>
             </div>
           )}
+        </div>
+
+        <div className="w-80 border-l border-gray-200 flex flex-col flex-shrink-0 bg-gray-50">
+          <div className="p-4 border-b border-gray-200">
+            <div className="flex items-center justify-between">
+              <h2 className="font-semibold text-gray-900 flex items-center gap-2">
+                <History className="w-4 h-4" />
+                规则命中时间线
+              </h2>
+              {selectedConversation && (
+                <Badge variant="info">
+                  {selectedConversation.guest.name}
+                </Badge>
+              )}
+            </div>
+            <p className="text-xs text-gray-500 mt-1">
+              {selectedConversation
+                ? `该客人的完整规则执行记录`
+                : '选择会话查看命中记录'}
+            </p>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-4">
+            {selectedConversation ? (
+              <HitTimeline
+                events={selectedConversation ? getHitEventsByGuestId(selectedConversation.guestId) : []}
+              />
+            ) : (
+              <div className="text-center py-12 text-gray-400">
+                <History className="w-10 h-10 mx-auto mb-2" />
+                <p className="text-sm">选择会话查看命中记录</p>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -1021,6 +1081,126 @@ const Conversations: React.FC = () => {
         </div>
       </div>
     </MainLayout>
+  );
+};
+
+const eventTypeConfig: Record<RuleHitEventType, {
+  icon: React.ReactNode;
+  bgColor: string;
+  iconColor: string;
+  label: string;
+}> = {
+  matched: {
+    icon: <CheckCircle className="w-4 h-4" />,
+    bgColor: 'bg-emerald-100',
+    iconColor: 'text-emerald-600',
+    label: '命中规则',
+  },
+  skipped_priority: {
+    icon: <Award className="w-4 h-4" />,
+    bgColor: 'bg-amber-100',
+    iconColor: 'text-amber-600',
+    label: '优先级跳过',
+  },
+  skipped_dedup: {
+    icon: <Shield className="w-4 h-4" />,
+    bgColor: 'bg-red-100',
+    iconColor: 'text-red-600',
+    label: '去重拦截',
+  },
+  skipped_manual: {
+    icon: <Hand className="w-4 h-4" />,
+    bgColor: 'bg-blue-100',
+    iconColor: 'text-blue-600',
+    label: '人工接管',
+  },
+  no_match: {
+    icon: <XCircle className="w-4 h-4" />,
+    bgColor: 'bg-gray-100',
+    iconColor: 'text-gray-600',
+    label: '无匹配规则',
+  },
+  restored_auto: {
+    icon: <RefreshCw className="w-4 h-4" />,
+    bgColor: 'bg-purple-100',
+    iconColor: 'text-purple-600',
+    label: '恢复自动',
+  },
+};
+
+const HitTimeline: React.FC<{ events: RuleHitEvent[] }> = ({ events }) => {
+  if (events.length === 0) {
+    return (
+      <div className="text-center py-8 text-gray-400">
+        <History className="w-8 h-8 mx-auto mb-2" />
+        <p className="text-sm">暂无命中记录</p>
+        <p className="text-xs mt-1">发送消息或模拟咨询后可查看</p>
+      </div>
+    );
+  }
+
+  const sortedEvents = [...events].sort(
+    (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+  );
+
+  return (
+    <div className="space-y-3">
+      {sortedEvents.map((event, idx) => {
+        const config = eventTypeConfig[event.eventType];
+        const isLast = idx === sortedEvents.length - 1;
+        return (
+          <div key={event.id} className="relative flex gap-3">
+            {!isLast && (
+              <div className="absolute left-4 top-8 bottom-0 w-0.5 bg-gray-200" />
+            )}
+            <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${config.bgColor}`}>
+              <span className={config.iconColor}>{config.icon}</span>
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center justify-between gap-2">
+                <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${config.bgColor} ${config.iconColor}`}>
+                  {config.label}
+                </span>
+                <span className="text-xs text-gray-400">
+                  {formatRelative(new Date(event.timestamp))}
+                </span>
+              </div>
+              {event.ruleName && (
+                <div className="text-sm font-medium text-gray-900 mt-1">
+                  {event.ruleName}
+                  {event.priority !== undefined && (
+                    <span className="text-xs text-gray-500 ml-1">(P{event.priority})</span>
+                  )}
+                </div>
+              )}
+              {event.hitExplanation && (
+                <div className="text-xs text-gray-600 mt-0.5">
+                  {event.hitExplanation}
+                </div>
+              )}
+              {event.reasons.length > 0 && (
+                <div className="mt-1 space-y-0.5">
+                  {event.reasons.slice(0, 2).map((reason, ridx) => (
+                    <div key={ridx} className="text-xs text-gray-500 flex items-start gap-1">
+                      <span className="text-gray-400 mt-0.5">•</span>
+                      <span>{reason}</span>
+                    </div>
+                  ))}
+                  {event.reasons.length > 2 && (
+                    <div className="text-xs text-gray-400">
+                      还有 {event.reasons.length - 2} 条...
+                    </div>
+                  )}
+                </div>
+              )}
+              <div className="text-xs text-gray-400 mt-1">
+                {formatDateTime(new Date(event.timestamp))}
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
   );
 };
 

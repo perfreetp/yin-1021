@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   BarChart,
@@ -28,6 +28,7 @@ import {
   PieChart as PieChartIcon,
   Download,
   ChevronRight,
+  RefreshCw,
 } from 'lucide-react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { StatsCard } from '@/components/shared/StatsCard';
@@ -35,10 +36,12 @@ import { Button } from '@/components/ui/Button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/Tabs';
 import { Tag } from '@/components/ui/Tag';
+import { Badge } from '@/components/ui/Badge';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/Table';
 import { Dropdown } from '@/components/ui/Dropdown';
 import { useAnalyticsStore } from '@/store/useAnalyticsStore';
 import { usePropertyStore } from '@/store/usePropertyStore';
+import { useConversationStore } from '@/store/useConversationStore';
 
 const Analytics: React.FC = () => {
   const navigate = useNavigate();
@@ -56,18 +59,39 @@ const Analytics: React.FC = () => {
     setPropertyFilter,
   } = useAnalyticsStore();
   const { properties } = usePropertyStore();
+  const { triggerStatusRefresh } = useConversationStore();
 
   const [activeTab, setActiveTab] = React.useState('overview');
+  const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
+  const [refreshCount, setRefreshCount] = useState(0);
+  const [autoRefresh, setAutoRefresh] = useState(true);
+  const refreshTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  const templateStats = useMemo(() => getTemplateStats(), [getTemplateStats, propertyFilter]);
-  const messageStats = useMemo(() => getMessageStats(), [getMessageStats, propertyFilter]);
-  const dailyTrend = useMemo(() => getDailyTrend(30), [getDailyTrend, propertyFilter]);
-  const responseEfficiency = useMemo(() => getResponseEfficiency(30), [getResponseEfficiency, propertyFilter]);
-  const propertyHistory = useMemo(() => getPropertyHistory(30), [getPropertyHistory]);
-  const topRewritten = useMemo(() => getTopRewrittenTemplates(10), [getTopRewrittenTemplates]);
-  const mostUsed = useMemo(() => getMostUsedTemplates(5), [getMostUsedTemplates]);
-  const autoReplyRate = useMemo(() => getAutoReplyRate(), [getAutoReplyRate, propertyFilter]);
-  const avgResponseTime = useMemo(() => getAverageResponseTime(), [getAverageResponseTime, propertyFilter]);
+  useEffect(() => {
+    if (autoRefresh) {
+      refreshTimerRef.current = setInterval(() => {
+        triggerStatusRefresh();
+        setLastRefresh(new Date());
+        setRefreshCount(c => c + 1);
+      }, 5000);
+    }
+
+    return () => {
+      if (refreshTimerRef.current) {
+        clearInterval(refreshTimerRef.current);
+      }
+    };
+  }, [autoRefresh, triggerStatusRefresh]);
+
+  const templateStats = useMemo(() => getTemplateStats(), [getTemplateStats, propertyFilter, refreshCount]);
+  const messageStats = useMemo(() => getMessageStats(), [getMessageStats, propertyFilter, refreshCount]);
+  const dailyTrend = useMemo(() => getDailyTrend(30), [getDailyTrend, propertyFilter, refreshCount]);
+  const responseEfficiency = useMemo(() => getResponseEfficiency(30), [getResponseEfficiency, propertyFilter, refreshCount]);
+  const propertyHistory = useMemo(() => getPropertyHistory(30), [getPropertyHistory, refreshCount]);
+  const topRewritten = useMemo(() => getTopRewrittenTemplates(10), [getTopRewrittenTemplates, refreshCount]);
+  const mostUsed = useMemo(() => getMostUsedTemplates(5), [getMostUsedTemplates, refreshCount]);
+  const autoReplyRate = useMemo(() => getAutoReplyRate(), [getAutoReplyRate, propertyFilter, refreshCount]);
+  const avgResponseTime = useMemo(() => getAverageResponseTime(), [getAverageResponseTime, propertyFilter, refreshCount]);
 
   const propertyOptions = [
     { value: 'all', label: '全部房源' },
@@ -119,7 +143,23 @@ const Analytics: React.FC = () => {
             <h1 className="text-2xl font-bold text-gray-900">效果统计</h1>
             <p className="text-gray-500 mt-1">分析沟通数据，优化模板和回复效率</p>
           </div>
-          <div className="flex gap-3">
+          <div className="flex gap-3 items-center">
+            <div className="flex items-center gap-2 mr-2">
+              <Badge variant={autoRefresh ? 'success' : 'default'} className="flex items-center gap-1">
+                <RefreshCw className={`w-3 h-3 ${autoRefresh ? 'animate-spin' : ''}`} />
+                {autoRefresh ? '实时刷新中' : '已暂停'}
+              </Badge>
+              <span className="text-xs text-gray-500">
+                上次更新: {lastRefresh.toLocaleTimeString()}
+              </span>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setAutoRefresh(!autoRefresh)}
+              >
+                {autoRefresh ? '暂停' : '开启'}
+              </Button>
+            </div>
             <Dropdown
               options={propertyOptions}
               value={propertyFilter || 'all'}

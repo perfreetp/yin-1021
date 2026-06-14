@@ -6,7 +6,9 @@ import { renderTemplate } from '../utils/template';
 import { useTemplateStore } from './useTemplateStore';
 import { usePropertyStore } from './usePropertyStore';
 import { useRuleStore } from './useRuleStore';
-import { shouldSendMessage, recordSentMessage } from '../utils/deduplication';
+import { shouldSendMessage, recordSentMessage, clearGuestDeduplication, getDeduplicationStatus } from '../utils/deduplication';
+
+export type ScenarioType = 'cross_channel' | 'delayed_followup' | 'manual_switch' | 'dedup_test';
 
 export interface SmartAutoReplyResult {
   success: boolean;
@@ -46,6 +48,8 @@ interface ConversationState {
   getConversationsByGuestId: (guestId: string) => Conversation[];
   getUnreadCount: () => number;
   setLastAutoReplyResult: (result: SmartAutoReplyResult | null) => void;
+  simulateScenario: (scenarioType: ScenarioType, options?: { guestName?: string; baseChannel?: string; propertyId?: string }) => string[];
+  triggerStatusRefresh: () => void;
 }
 
 const STORAGE_KEY = 'conversations_data';
@@ -187,13 +191,30 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
     }
 
     if (conversation.manualOverride) {
+      useRuleStore.getState().recordRuleHitEvent({
+        conversationId: conversation.id,
+        guestId: conversation.guestId,
+        eventType: 'skipped_manual',
+        reasons: ['人工接管中，已暂停自动回复'],
+      });
       const result: SmartAutoReplyResult = { success: false, reason: '人工接管中，已暂停自动回复。请关闭人工接管开关恢复自动。' };
       set({ lastAutoReplyResult: result });
       return result;
     }
 
     const dedupKey = `${conversation.id}-${conversation.stayStage}`;
+    const dedupStatus = getDeduplicationStatus(conversation.guestId, dedupKey);
     if (!shouldSendMessage(conversation.guestId, dedupKey)) {
+      const timeRemaining = dedupStatus.timeRemaining || 0;
+      const hours = Math.floor(timeRemaining / (60 * 60 * 1000));
+      const minutes = Math.floor((timeRemaining % (60 * 60 * 1000)) / (60 * 1000));
+      useRuleStore.getState().recordRuleHitEvent({
+        conversationId: conversation.id,
+        guestId: conversation.guestId,
+        eventType: 'skipped_dedup',
+        reasons: [`24小时去重拦截：该场景已于${dedupStatus.lastSent?.toLocaleString()}发送过，还剩${hours}小时${minutes}分钟解除`],
+        dedupKey,
+      });
       const result: SmartAutoReplyResult = { success: false, reason: '24小时内已发送过该类型消息，避免重复打扰' };
       set({ lastAutoReplyResult: result });
       return result;
@@ -306,26 +327,37 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
   },
   
   toggleManualOverride: (conversationId) => {
+    const conv = get().getConversationById(conversationId);
+    const newOverride = !conv?.manualOverride;
     const conversations = get().conversations.map(c =>
-      c.id === conversationId ? { ...c, manualOverride: !c.manualOverride } : c
+      c.id === conversationId ? { ...c, manualOverride: newOverride } : c
     );
     set({ conversations });
     saveToLocalStorage(STORAGE_KEY, conversations);
   },
 
   restoreAutoReply: (conversationId) => {
+    const conv = get().getConversationById(conversationId);
+    if (!conv) return;
+
+    clearGuestDeduplication(conv.guestId);
+
     const conversations = get().conversations.map(c =>
       c.id === conversationId ? { ...c, manualOverride: false } : c
     );
     set({ conversations });
     saveToLocalStorage(STORAGE_KEY, conversations);
 
+    useRuleStore.getState().recordRuleHitEvent({
+      conversationId,
+      guestId: conv.guestId,
+      eventType: 'restored_auto',
+      reasons: ['已解除人工接管，清除该客人所有去重记录，恢复自动回复'],
+    });
+
     setTimeout(() => {
-      const conv = get().getConversationById(conversationId);
-      if (conv) {
-        const result = get().smartAutoReply(conversationId);
-        console.log('恢复自动后触发回复:', result);
-      }
+      const result = get().smartAutoReply(conversationId);
+      console.log('恢复自动后触发回复:', result);
     }, 300);
   },
   
@@ -418,4 +450,141 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
   },
 
   getUnreadCount: () => get().conversations.reduce((sum, c) => sum + c.unreadCount, 0),
+
+  triggerStatusRefresh: () => {
+    const conversations = get().conversations;
+    conversations.forEach(conv => {
+      const sendingMessages = conv.messages.filter(m => m.status === 'sending');
+      if (sendingMessages.length > 0) {
+        get().simulateMessageStatusFlow(conv.id);
+      }
+    });
+  },
+
+  simulateScenario: (scenarioType, options = {}) => {
+    const {
+      guestName = '测试客人',
+      baseChannel = 'airbnb',
+      propertyId = 'p1',
+    } = options;
+
+    const createdIds: string[] = [];
+    const guestId = `g_scenario_${Date.now()}`;
+    const channels = ['airbnb', 'ctrip', 'meituan', 'xiaohongshu'];
+
+    switch (scenarioType) {
+      case 'cross_channel': {
+        const otherChannels = channels.filter(c => c !== baseChannel).slice(0, 2);
+        const firstConvId = get().simulateNewInquiry(
+          baseChannel,
+          propertyId,
+          guestName,
+          '你好，请问这套房子还空着吗？',
+          'inquiry',
+          guestId
+        );
+        createdIds.push(firstConvId);
+
+        setTimeout(() => {
+          otherChannels.forEach((channel, idx) => {
+            setTimeout(() => {
+              const convId = get().simulateNewInquiry(
+                channel,
+                propertyId,
+                guestName,
+                idx === 0 ? '请问能优惠点吗？我在其他平台也看到了' : '可以留到明天吗？我再确认一下行程',
+                'inquiry',
+                guestId
+              );
+              createdIds.push(convId);
+            }, idx * 1500);
+          });
+        }, 2000);
+        break;
+      }
+
+      case 'delayed_followup': {
+        const firstConvId = get().simulateNewInquiry(
+          baseChannel,
+          propertyId,
+          guestName,
+          '你好，想咨询一下房源',
+          'inquiry',
+          guestId
+        );
+        createdIds.push(firstConvId);
+
+        setTimeout(() => {
+          get().simulateFollowUpMessage(
+            firstConvId,
+            '还在吗？我想了解一下具体的入住流程'
+          );
+        }, 3000);
+        break;
+      }
+
+      case 'manual_switch': {
+        const convId = get().simulateNewInquiry(
+          baseChannel,
+          propertyId,
+          guestName,
+          '你好，请问可以带宠物吗？',
+          'inquiry',
+          guestId
+        );
+        createdIds.push(convId);
+
+        setTimeout(() => {
+          get().toggleManualOverride(convId);
+          get().sendMessage(convId, '您好，可以带宠物的，我们家是宠物友好房源~', false);
+        }, 2000);
+
+        setTimeout(() => {
+          get().simulateGuestReply(convId, '太好了！那我预定了哈');
+        }, 4000);
+
+        setTimeout(() => {
+          get().restoreAutoReply(convId);
+        }, 6000);
+        break;
+      }
+
+      case 'dedup_test': {
+        const convId = get().simulateNewInquiry(
+          baseChannel,
+          propertyId,
+          guestName,
+          '第一次咨询，想了解一下房源',
+          'inquiry',
+          guestId
+        );
+        createdIds.push(convId);
+
+        setTimeout(() => {
+          get().simulateFollowUpMessage(
+            convId,
+            '第二次咨询，去重应该拦住了吧？'
+          );
+        }, 3000);
+
+        setTimeout(() => {
+          get().simulateGuestReply(convId, '客人自己说句话');
+        }, 5000);
+
+        setTimeout(() => {
+          get().restoreAutoReply(convId);
+        }, 7000);
+
+        setTimeout(() => {
+          get().simulateFollowUpMessage(
+            convId,
+            '恢复自动后再发一条，去重已经清掉了吧？'
+          );
+        }, 9000);
+        break;
+      }
+    }
+
+    return createdIds;
+  },
 }));

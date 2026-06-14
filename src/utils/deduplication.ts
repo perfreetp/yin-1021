@@ -36,3 +36,31 @@ export function recordSentMessage(guestId: string, messageType: string): void {
   
   localStorage.setItem(SENT_MESSAGES_KEY, JSON.stringify(sentMessages));
 }
+
+export function clearGuestDeduplication(guestId: string): void {
+  const sentMessages = getSentMessages();
+  const prefix = `${guestId}_`;
+  Object.keys(sentMessages).forEach(k => {
+    if (k.startsWith(prefix)) {
+      delete sentMessages[k];
+    }
+  });
+  localStorage.setItem(SENT_MESSAGES_KEY, JSON.stringify(sentMessages));
+}
+
+export function getDeduplicationStatus(guestId: string, messageType: string): { blocked: boolean; lastSent?: Date; timeRemaining?: number } {
+  const sentMessages = getSentMessages();
+  const key = `${guestId}_${messageType}`;
+  const lastSent = sentMessages[key];
+  
+  if (!lastSent) {
+    return { blocked: false };
+  }
+  
+  const timeRemaining = DEDUP_WINDOW - (Date.now() - lastSent);
+  return {
+    blocked: timeRemaining > 0,
+    lastSent: new Date(lastSent),
+    timeRemaining: timeRemaining > 0 ? timeRemaining : 0,
+  };
+}
