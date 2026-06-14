@@ -9,6 +9,7 @@ export interface TemplateStats {
 
 export interface MessageStats {
   totalSent: number;
+  sending: number;
   delivered: number;
   read: number;
   failed: number;

@@ -50,6 +50,7 @@ export const useAnalyticsStore = create<AnalyticsState>((set, get) => ({
       : conversations;
     
     let totalSent = 0;
+    let sending = 0;
     let delivered = 0;
     let read = 0;
     let failed = 0;
@@ -60,7 +61,8 @@ export const useAnalyticsStore = create<AnalyticsState>((set, get) => ({
       conv.messages.forEach(msg => {
         if (msg.senderType === 'guest') return;
         totalSent++;
-        if (msg.status === 'delivered' || msg.status === 'read') delivered++;
+        if (msg.status === 'sending') sending++;
+        if (msg.status === 'delivered') delivered++;
         if (msg.status === 'read') read++;
         if (msg.status === 'failed') failed++;
         if (msg.senderType === 'auto') autoReplied++;
@@ -68,7 +70,7 @@ export const useAnalyticsStore = create<AnalyticsState>((set, get) => ({
       });
     });
     
-    return { totalSent, delivered, read, failed, autoReplied, manualReplied };
+    return { totalSent, sending, delivered, read, failed, autoReplied, manualReplied };
   },
   
   getDailyTrend: (days = 30) => {

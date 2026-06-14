@@ -4,6 +4,7 @@ const now = new Date();
 const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
 
 function generatePerformance(ruleId: string, hitCount: number): AutoReplyRule['performance'] {
+  const avgResponseTime = 45 + Math.floor(Math.random() * 30);
   return [
     {
       ruleId,
@@ -13,7 +14,8 @@ function generatePerformance(ruleId: string, hitCount: number): AutoReplyRule['p
       deliveryCount: Math.round(hitCount * 0.97),
       readCount: Math.round(hitCount * 0.82),
       followUpCount: Math.round(hitCount * 0.35),
-      avgResponseTime: 45 + Math.floor(Math.random() * 30),
+      totalResponseTime: hitCount * avgResponseTime,
+      avgResponseTime,
     },
   ];
 }

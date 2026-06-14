@@ -12,9 +12,10 @@ export const mockTemplateStats: TemplateStats[] = mockTemplates.map(t => ({
 
 export const mockMessageStats: MessageStats = {
   totalSent: 892,
-  delivered: 876,
+  sending: 12,
+  delivered: 64,
   read: 812,
-  failed: 16,
+  failed: 4,
   autoReplied: 724,
   manualReplied: 168,
 };

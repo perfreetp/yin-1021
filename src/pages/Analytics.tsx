@@ -117,10 +117,18 @@ const Analytics: React.FC = () => {
   ];
 
   const statusDistributionData = [
+    { name: '发送中', value: messageStats.sending, color: '#f59e0b' },
     { name: '已送达', value: messageStats.delivered, color: '#10b981' },
     { name: '已读', value: messageStats.read, color: '#1e3a5f' },
     { name: '发送失败', value: messageStats.failed, color: '#ef4444' },
-  ];
+  ].filter(item => item.value > 0);
+
+  const deliveryRate = messageStats.totalSent > 0 
+    ? Math.round(((messageStats.delivered + messageStats.read) / messageStats.totalSent) * 100) 
+    : 0;
+  const readRate = messageStats.totalSent > 0 
+    ? Math.round((messageStats.read / messageStats.totalSent) * 100) 
+    : 0;
 
   const formatResponseTime = (seconds: number) => {
     if (seconds < 60) return `${seconds}秒`;
@@ -182,14 +190,14 @@ const Analytics: React.FC = () => {
           />
           <StatsCard
             title="送达率"
-            value={`${messageStats.totalSent > 0 ? Math.round((messageStats.delivered / messageStats.totalSent) * 100) : 0}%`}
+            value={`${deliveryRate}%`}
             icon={<CheckCircle className="w-5 h-5" />}
             trend={{ value: 2, isUp: true }}
             color="success"
           />
           <StatsCard
             title="已读率"
-            value={`${messageStats.totalSent > 0 ? Math.round((messageStats.read / messageStats.totalSent) * 100) : 0}%`}
+            value={`${readRate}%`}
             icon={<CheckCircle className="w-5 h-5" />}
             color="warning"
           />

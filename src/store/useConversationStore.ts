@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Conversation, Message, SpecialNeed, SpecialNeedType, StayStage } from '../types/conversation';
+import type { Conversation, Message, SpecialNeed, SpecialNeedType, StayStage, MessageStatus } from '../types/conversation';
 import { mockConversations } from '../mock/conversations';
 import { loadFromLocalStorage, saveToLocalStorage } from '../utils/storage';
 import { renderTemplate } from '../utils/template';
@@ -9,6 +9,43 @@ import { useRuleStore } from './useRuleStore';
 import { shouldSendMessage, recordSentMessage, clearGuestDeduplication, getDeduplicationStatus } from '../utils/deduplication';
 
 export type ScenarioType = 'cross_channel' | 'delayed_followup' | 'manual_switch' | 'dedup_test';
+
+export type DedupTestDimension = 'by_guest' | 'by_channel' | 'by_stage';
+
+export interface DedupTestItem {
+  guestId: string;
+  guestName: string;
+  channel: string;
+  propertyId: string;
+  stayStage: StayStage;
+  content: string;
+}
+
+export interface DedupTestItemResult {
+  id: string;
+  guestId: string;
+  guestName: string;
+  channel: string;
+  propertyId: string;
+  propertyName: string;
+  stayStage: string;
+  content: string;
+  passed: boolean;
+  blocked: boolean;
+  dedupKey?: string;
+  ruleId?: string;
+  ruleName?: string;
+  reason?: string;
+}
+
+export interface DedupTestResult {
+  testId: string;
+  totalCount: number;
+  passedCount: number;
+  blockedCount: number;
+  noMatchCount: number;
+  items: DedupTestItemResult[];
+}
 
 export interface SmartAutoReplyResult {
   success: boolean;
@@ -29,7 +66,7 @@ interface ConversationState {
   setConversations: (conversations: Conversation[]) => void;
   setSelectedConversationId: (id: string | null) => void;
   sendMessage: (conversationId: string, content: string, isRewritten?: boolean, templateId?: string) => void;
-  sendAutoReply: (conversationId: string, templateId: string, data: Record<string, any>) => void;
+  sendAutoReply: (conversationId: string, templateId: string, data: Record<string, any>, ruleId?: string) => void;
   smartAutoReply: (conversationId: string) => SmartAutoReplyResult;
   receiveMessage: (conversationId: string, content: string, simulateGuest?: boolean) => void;
   simulateNewInquiry: (channel: string, propertyId: string, guestName: string, content: string, stayStage: StayStage, existingGuestId?: string) => string;
@@ -50,6 +87,8 @@ interface ConversationState {
   setLastAutoReplyResult: (result: SmartAutoReplyResult | null) => void;
   simulateScenario: (scenarioType: ScenarioType, options?: { guestName?: string; baseChannel?: string; propertyId?: string }) => string[];
   triggerStatusRefresh: () => void;
+  generateDedupTestItems: (dimension: DedupTestDimension, baseGuestId?: string) => DedupTestItem[];
+  runDedupTest: (items: DedupTestItem[]) => DedupTestResult;
 }
 
 const STORAGE_KEY = 'conversations_data';
@@ -102,10 +141,27 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
       useTemplateStore.getState().incrementRewrite(templateId);
     }
 
+    const conv = get().getConversationById(conversationId);
+    if (conv) {
+      const property = usePropertyStore.getState().getPropertyById(conv.propertyId);
+      useRuleStore.getState().recordRuleHitEvent({
+        conversationId,
+        guestId: conv.guestId,
+        eventType: 'manual_message',
+        reasons: [`人工回复：${content.length > 30 ? content.slice(0, 30) + '...' : content}`],
+        messageContent: content,
+        messageId: newMessage.id,
+        channel: conv.channel,
+        propertyId: conv.propertyId,
+        propertyName: property?.name,
+        stayStage: conv.stayStage,
+      });
+    }
+
     get().simulateMessageStatusFlow(conversationId);
   },
   
-  sendAutoReply: (conversationId, templateId, data) => {
+  sendAutoReply: (conversationId, templateId, data, ruleId) => {
     const template = useTemplateStore.getState().getTemplateById(templateId);
     if (!template) return;
     
@@ -117,6 +173,7 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
       senderType: 'auto',
       content,
       templateId,
+      ruleId,
       status: 'sending',
       sentAt: now,
     };
@@ -133,6 +190,17 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
     set({ conversations });
     saveToLocalStorage(STORAGE_KEY, conversations);
     useTemplateStore.getState().incrementUsage(templateId);
+
+    if (ruleId) {
+      const conv = conversations.find(c => c.id === conversationId);
+      const guestMessages = conv?.messages.filter(m => m.senderType === 'guest') || [];
+      const lastGuestMsg = guestMessages[guestMessages.length - 1];
+      let responseTime = 0;
+      if (lastGuestMsg) {
+        responseTime = Math.round((now.getTime() - new Date(lastGuestMsg.sentAt).getTime()) / 1000);
+      }
+      useRuleStore.getState().recordRuleHit(ruleId, responseTime);
+    }
 
     setTimeout(() => {
       get().simulateMessageStatusFlow(conversationId);
@@ -164,7 +232,20 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
   },
 
   updateMessageStatus: (messageId, status) => {
-    const conversations = get().conversations.map(c => ({
+    const conversations = get().conversations;
+    let targetRuleId: string | undefined;
+    let oldStatus: MessageStatus | undefined;
+
+    for (const conv of conversations) {
+      const msg = conv.messages.find(m => m.id === messageId);
+      if (msg) {
+        targetRuleId = msg.ruleId;
+        oldStatus = msg.status;
+        break;
+      }
+    }
+
+    const updatedConversations = conversations.map(c => ({
       ...c,
       messages: c.messages.map(m => {
         if (m.id !== messageId) return m;
@@ -178,8 +259,17 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
         };
       }),
     }));
-    set({ conversations });
-    saveToLocalStorage(STORAGE_KEY, conversations);
+    set({ conversations: updatedConversations });
+    saveToLocalStorage(STORAGE_KEY, updatedConversations);
+
+    if (targetRuleId) {
+      if (status === 'delivered' && oldStatus !== 'delivered' && oldStatus !== 'read') {
+        useRuleStore.getState().recordRuleDelivery(targetRuleId);
+      }
+      if (status === 'read' && oldStatus !== 'read') {
+        useRuleStore.getState().recordRuleRead(targetRuleId);
+      }
+    }
   },
 
   smartAutoReply: (conversationId) => {
@@ -202,7 +292,7 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
       return result;
     }
 
-    const dedupKey = `${conversation.id}-${conversation.stayStage}`;
+    const dedupKey = `stage_${conversation.stayStage}`;
     const dedupStatus = getDeduplicationStatus(conversation.guestId, dedupKey);
     if (!shouldSendMessage(conversation.guestId, dedupKey)) {
       const timeRemaining = dedupStatus.timeRemaining || 0;
@@ -268,7 +358,7 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
       延迟退房时间: '14:00',
     };
 
-    get().sendAutoReply(conversationId, matchResult.templateId, data);
+    get().sendAutoReply(conversationId, matchResult.templateId, data, matchResult.ruleId);
     recordSentMessage(conversation.guestId, dedupKey);
 
     const result: SmartAutoReplyResult = {
@@ -297,7 +387,10 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
       readAt: now,
     };
     
-    const conversations = get().conversations.map(c => {
+    const currentConversations = get().conversations;
+    const conv = currentConversations.find(c => c.id === conversationId);
+    
+    const conversations = currentConversations.map(c => {
       if (c.id !== conversationId) return c;
       return {
         ...c,
@@ -309,6 +402,32 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
     
     set({ conversations });
     saveToLocalStorage(STORAGE_KEY, conversations);
+
+    if (simulateGuest && conv) {
+      const property = usePropertyStore.getState().getPropertyById(conv.propertyId);
+      useRuleStore.getState().recordRuleHitEvent({
+        conversationId,
+        guestId: conv.guestId,
+        eventType: 'guest_message',
+        reasons: [`客人消息：${content.length > 30 ? content.slice(0, 30) + '...' : content}`],
+        messageContent: content,
+        messageId: newMessage.id,
+        channel: conv.channel,
+        propertyId: conv.propertyId,
+        propertyName: property?.name,
+        stayStage: conv.stayStage,
+      });
+
+      const autoMessages = conv.messages.filter(
+        m => m.senderType === 'auto' && m.ruleId
+      );
+      if (autoMessages.length > 0) {
+        const lastAutoMsg = autoMessages[autoMessages.length - 1];
+        if (lastAutoMsg.ruleId) {
+          useRuleStore.getState().recordRuleFollowUp(lastAutoMsg.ruleId);
+        }
+      }
+    }
   },
 
   simulateFollowUpMessage: (conversationId, content) => {
@@ -328,12 +447,27 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
   
   toggleManualOverride: (conversationId) => {
     const conv = get().getConversationById(conversationId);
-    const newOverride = !conv?.manualOverride;
+    if (!conv) return;
+    const newOverride = !conv.manualOverride;
     const conversations = get().conversations.map(c =>
       c.id === conversationId ? { ...c, manualOverride: newOverride } : c
     );
     set({ conversations });
     saveToLocalStorage(STORAGE_KEY, conversations);
+
+    const property = usePropertyStore.getState().getPropertyById(conv.propertyId);
+    if (newOverride) {
+      useRuleStore.getState().recordRuleHitEvent({
+        conversationId,
+        guestId: conv.guestId,
+        eventType: 'manual_takeover',
+        reasons: ['人工接管：手动开启，暂停自动回复'],
+        channel: conv.channel,
+        propertyId: conv.propertyId,
+        propertyName: property?.name,
+        stayStage: conv.stayStage,
+      });
+    }
   },
 
   restoreAutoReply: (conversationId) => {
@@ -348,11 +482,16 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
     set({ conversations });
     saveToLocalStorage(STORAGE_KEY, conversations);
 
+    const property = usePropertyStore.getState().getPropertyById(conv.propertyId);
     useRuleStore.getState().recordRuleHitEvent({
       conversationId,
       guestId: conv.guestId,
       eventType: 'restored_auto',
       reasons: ['已解除人工接管，清除该客人所有去重记录，恢复自动回复'],
+      channel: conv.channel,
+      propertyId: conv.propertyId,
+      propertyName: property?.name,
+      stayStage: conv.stayStage,
     });
 
     setTimeout(() => {
@@ -586,5 +725,168 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
     }
 
     return createdIds;
+  },
+
+  generateDedupTestItems: (dimension, baseGuestId) => {
+    const channels = ['airbnb', 'ctrip', 'meituan', 'xiaohongshu'];
+    const stages: StayStage[] = ['inquiry', 'pre_checkin', 'during_stay', 'post_checkout'];
+    const properties = usePropertyStore.getState().properties;
+    const items: DedupTestItem[] = [];
+    const testGuestId = baseGuestId || `g_dedup_test_${Date.now()}`;
+    const testGuestName = '去重测试客人';
+
+    if (dimension === 'by_guest') {
+      channels.forEach((channel, cIdx) => {
+        stages.forEach((stage, sIdx) => {
+          for (let round = 0; round < 2; round++) {
+            items.push({
+              guestId: testGuestId,
+              guestName: testGuestName,
+              channel,
+              propertyId: properties[cIdx % properties.length]?.id || 'p1',
+              stayStage: stage,
+              content: round === 0 
+                ? `【第1轮】${channel}渠道-${stage}阶段咨询` 
+                : `【第2轮】${channel}渠道-${stage}阶段咨询（测试去重）`,
+            });
+          }
+        });
+      });
+    } else if (dimension === 'by_channel') {
+      channels.forEach((channel, cIdx) => {
+        stages.forEach((stage, sIdx) => {
+          for (let i = 0; i < 2; i++) {
+            items.push({
+              guestId: `g_guest_${cIdx}_${sIdx}_${i}`,
+              guestName: `客人${cIdx + 1}-${sIdx + 1}-${i + 1}`,
+              channel,
+              propertyId: properties[i % properties.length]?.id || 'p1',
+              stayStage: stage,
+              content: `${channel}渠道-${stage}阶段-客人${i + 1}咨询`,
+            });
+          }
+        });
+      });
+    } else {
+      stages.forEach((stage, sIdx) => {
+        channels.forEach((channel, cIdx) => {
+          for (let i = 0; i < 2; i++) {
+            items.push({
+              guestId: `g_guest_${sIdx}_${cIdx}_${i}`,
+              guestName: `客人${sIdx + 1}-${cIdx + 1}-${i + 1}`,
+              channel,
+              propertyId: properties[i % properties.length]?.id || 'p1',
+              stayStage: stage,
+              content: `${stage}阶段-${channel}渠道-客人${i + 1}咨询`,
+            });
+          }
+        });
+      });
+    }
+
+    return items;
+  },
+
+  runDedupTest: (items) => {
+    const results: DedupTestItemResult[] = [];
+    const propertyStore = usePropertyStore.getState();
+
+    items.forEach((item, idx) => {
+      const convId = `conv_test_${idx}_${Date.now()}`;
+      const dedupKey = `stage_${item.stayStage}`;
+      const dedupStatus = getDeduplicationStatus(item.guestId, dedupKey);
+      const isBlocked = !shouldSendMessage(item.guestId, dedupKey);
+
+      const property = propertyStore.getPropertyById(item.propertyId);
+
+      if (isBlocked) {
+        const timeRemaining = dedupStatus.timeRemaining || 0;
+        const hours = Math.floor(timeRemaining / (60 * 60 * 1000));
+        const minutes = Math.floor((timeRemaining % (60 * 60 * 1000)) / (60 * 1000));
+        results.push({
+          id: `result_${idx}`,
+          guestId: item.guestId,
+          guestName: item.guestName,
+          channel: item.channel,
+          propertyId: item.propertyId,
+          propertyName: property?.name || '',
+          stayStage: item.stayStage,
+          content: item.content,
+          passed: false,
+          blocked: true,
+          dedupKey,
+          reason: `去重拦截：该场景已于${dedupStatus.lastSent?.toLocaleString()}发送过，还剩${hours}小时${minutes}分钟解除`,
+        });
+      } else {
+        const tempConv: Conversation = {
+          id: convId,
+          guestId: item.guestId,
+          propertyId: item.propertyId,
+          channel: item.channel,
+          manualOverride: false,
+          lastMessageAt: new Date(),
+          unreadCount: 1,
+          stayStage: item.stayStage,
+          guest: {
+            id: item.guestId,
+            name: item.guestName,
+            phone: '',
+            platform: item.channel,
+          },
+          messages: [],
+          specialNeeds: [],
+        };
+
+        const matchResult = useRuleStore.getState().matchRule(tempConv);
+
+        if (!matchResult.matched || !matchResult.templateId) {
+          results.push({
+            id: `result_${idx}`,
+            guestId: item.guestId,
+            guestName: item.guestName,
+            channel: item.channel,
+            propertyId: item.propertyId,
+            propertyName: property?.name || '',
+            stayStage: item.stayStage,
+            content: item.content,
+            passed: false,
+            blocked: false,
+            dedupKey,
+            reason: `未命中规则：${matchResult.reasons.join('；') || '请检查规则配置'}`,
+          });
+        } else {
+          recordSentMessage(item.guestId, dedupKey);
+          results.push({
+            id: `result_${idx}`,
+            guestId: item.guestId,
+            guestName: item.guestName,
+            channel: item.channel,
+            propertyId: item.propertyId,
+            propertyName: property?.name || '',
+            stayStage: item.stayStage,
+            content: item.content,
+            passed: true,
+            blocked: false,
+            dedupKey,
+            ruleId: matchResult.ruleId,
+            ruleName: matchResult.ruleName,
+            reason: `命中规则「${matchResult.ruleName}」，消息已放行`,
+          });
+        }
+      }
+    });
+
+    const passedCount = results.filter(r => r.passed).length;
+    const blockedCount = results.filter(r => r.blocked).length;
+    const noMatchCount = results.filter(r => !r.passed && !r.blocked).length;
+
+    return {
+      testId: `dedup_test_${Date.now()}`,
+      totalCount: results.length,
+      passedCount,
+      blockedCount,
+      noMatchCount,
+      items: results,
+    };
   },
 }));

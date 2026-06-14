@@ -29,8 +29,24 @@ interface RuleStoreState {
   recordRuleHitEvent: (event: Omit<RuleHitEvent, 'id' | 'timestamp'>) => void;
   getHitEventsByConversationId: (conversationId: string) => RuleHitEvent[];
   getHitEventsByGuestId: (guestId: string) => RuleHitEvent[];
-  updateRulePerformance: (ruleId: string, metric: ObservationMetric, value: number) => void;
-  getRuleComparison: (ruleIds: string[]) => {
+  recordRuleHit: (ruleId: string, responseTime?: number) => void;
+  recordRuleDelivery: (ruleId: string) => void;
+  recordRuleRead: (ruleId: string) => void;
+  recordRuleFollowUp: (ruleId: string) => void;
+  getRulePerformanceStats: (ruleIds: string[], days?: number) => {
+    ruleId: string;
+    ruleName: string;
+    hitCount: number;
+    deliveryCount: number;
+    readCount: number;
+    followUpCount: number;
+    totalResponseTime: number;
+    deliveryRate: number;
+    readRate: number;
+    followUpRate: number;
+    avgResponseTime: number;
+  }[];
+  getRuleComparison: (ruleIds: string[], days?: number) => {
     ruleId: string;
     ruleName: string;
     hitCount: number;
@@ -195,6 +211,9 @@ export const useRuleStore = create<RuleStoreState>((set, get) => ({
         guestId: conversation.guestId,
         eventType: 'no_match',
         reasons: result.reasons,
+        channel: conversation.channel,
+        propertyId: conversation.propertyId,
+        stayStage: conversation.stayStage,
       });
 
       set({ lastMatchResult: result });
@@ -225,6 +244,9 @@ export const useRuleStore = create<RuleStoreState>((set, get) => ({
       hitExplanation: winner.rule.hitExplanation,
       reasons: winner.check.reasons,
       competingRules: result.competingRules,
+      channel: conversation.channel,
+      propertyId: conversation.propertyId,
+      stayStage: conversation.stayStage,
     });
 
     matchedRules.slice(1).forEach(item => {
@@ -237,6 +259,9 @@ export const useRuleStore = create<RuleStoreState>((set, get) => ({
         priority: item.rule.priority,
         hitExplanation: item.rule.hitExplanation,
         reasons: [`优先级低于已匹配规则「${winner.rule.name}」(P${winner.rule.priority})`],
+        channel: conversation.channel,
+        propertyId: conversation.propertyId,
+        stayStage: conversation.stayStage,
       });
     });
 
@@ -273,51 +298,151 @@ export const useRuleStore = create<RuleStoreState>((set, get) => ({
       .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
   },
 
-  updateRulePerformance: (ruleId, metric, value) => {
+  recordRuleHit: (ruleId, responseTime) => {
     const rules = get().rules.map(r => {
       if (r.id !== ruleId) return r;
-      
+
       const now = new Date();
-      let currentPerf = r.performance.find(p => 
-        new Date(p.periodStart).toDateString() === new Date(now.getTime() - 24 * 60 * 60 * 1000).toDateString()
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      let todayPerf = r.performance.find(p => 
+        new Date(p.periodStart).getTime() === today.getTime()
       );
-      
-      if (!currentPerf) {
-        currentPerf = {
+
+      if (!todayPerf) {
+        todayPerf = {
           ruleId,
-          periodStart: new Date(now.getTime() - 24 * 60 * 60 * 1000),
-          periodEnd: now,
-          hitCount: r.hitCount,
+          periodStart: today,
+          periodEnd: new Date(today.getTime() + 24 * 60 * 60 * 1000),
+          hitCount: 0,
           deliveryCount: 0,
           readCount: 0,
           followUpCount: 0,
           avgResponseTime: 0,
+          totalResponseTime: 0,
         };
       }
 
-      switch (metric) {
-        case 'deliveryRate':
-          currentPerf.deliveryCount = Math.round(currentPerf.hitCount * value);
-          break;
-        case 'readRate':
-          currentPerf.readCount = Math.round(currentPerf.hitCount * value);
-          break;
-        case 'followUpRate':
-          currentPerf.followUpCount = Math.round(currentPerf.hitCount * value);
-          break;
-        case 'responseTime':
-          currentPerf.avgResponseTime = value;
-          break;
+      todayPerf.hitCount += 1;
+      if (responseTime !== undefined) {
+        todayPerf.totalResponseTime = (todayPerf.totalResponseTime || 0) + responseTime;
+        todayPerf.avgResponseTime = Math.round(todayPerf.totalResponseTime / todayPerf.hitCount);
       }
 
-      const otherPerf = r.performance.filter(p => p !== currentPerf);
-      return { ...r, performance: [...otherPerf, currentPerf] };
+      const otherPerf = r.performance.filter(p => 
+        new Date(p.periodStart).getTime() !== today.getTime()
+      );
+      return { ...r, performance: [...otherPerf, todayPerf] };
     });
     set({ rules });
     saveToLocalStorage(STORAGE_KEY, rules);
   },
 
-  getRuleComparison: (ruleIds) => {
+  recordRuleDelivery: (ruleId) => {
+    const rules = get().rules.map(r => {
+      if (r.id !== ruleId) return r;
+
+      const now = new Date();
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      let todayPerf = r.performance.find(p => 
+        new Date(p.periodStart).getTime() === today.getTime()
+      );
+
+      if (!todayPerf) {
+        todayPerf = {
+          ruleId,
+          periodStart: today,
+          periodEnd: new Date(today.getTime() + 24 * 60 * 60 * 1000),
+          hitCount: 0,
+          deliveryCount: 0,
+          readCount: 0,
+          followUpCount: 0,
+          avgResponseTime: 0,
+          totalResponseTime: 0,
+        };
+      }
+
+      todayPerf.deliveryCount += 1;
+
+      const otherPerf = r.performance.filter(p => 
+        new Date(p.periodStart).getTime() !== today.getTime()
+      );
+      return { ...r, performance: [...otherPerf, todayPerf] };
+    });
+    set({ rules });
+    saveToLocalStorage(STORAGE_KEY, rules);
+  },
+
+  recordRuleRead: (ruleId) => {
+    const rules = get().rules.map(r => {
+      if (r.id !== ruleId) return r;
+
+      const now = new Date();
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      let todayPerf = r.performance.find(p => 
+        new Date(p.periodStart).getTime() === today.getTime()
+      );
+
+      if (!todayPerf) {
+        todayPerf = {
+          ruleId,
+          periodStart: today,
+          periodEnd: new Date(today.getTime() + 24 * 60 * 60 * 1000),
+          hitCount: 0,
+          deliveryCount: 0,
+          readCount: 0,
+          followUpCount: 0,
+          avgResponseTime: 0,
+          totalResponseTime: 0,
+        };
+      }
+
+      todayPerf.readCount += 1;
+
+      const otherPerf = r.performance.filter(p => 
+        new Date(p.periodStart).getTime() !== today.getTime()
+      );
+      return { ...r, performance: [...otherPerf, todayPerf] };
+    });
+    set({ rules });
+    saveToLocalStorage(STORAGE_KEY, rules);
+  },
+
+  recordRuleFollowUp: (ruleId) => {
+    const rules = get().rules.map(r => {
+      if (r.id !== ruleId) return r;
+
+      const now = new Date();
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      let todayPerf = r.performance.find(p => 
+        new Date(p.periodStart).getTime() === today.getTime()
+      );
+
+      if (!todayPerf) {
+        todayPerf = {
+          ruleId,
+          periodStart: today,
+          periodEnd: new Date(today.getTime() + 24 * 60 * 60 * 1000),
+          hitCount: 0,
+          deliveryCount: 0,
+          readCount: 0,
+          followUpCount: 0,
+          avgResponseTime: 0,
+          totalResponseTime: 0,
+        };
+      }
+
+      todayPerf.followUpCount += 1;
+
+      const otherPerf = r.performance.filter(p => 
+        new Date(p.periodStart).getTime() !== today.getTime()
+      );
+      return { ...r, performance: [...otherPerf, todayPerf] };
+    });
+    set({ rules });
+    saveToLocalStorage(STORAGE_KEY, rules);
+  },
+
+  getRulePerformanceStats: (ruleIds, days = 7) => {
     return ruleIds.map(ruleId => {
       const rule = get().getRuleById(ruleId);
       if (!rule) {
@@ -325,6 +450,10 @@ export const useRuleStore = create<RuleStoreState>((set, get) => ({
           ruleId,
           ruleName: '未知规则',
           hitCount: 0,
+          deliveryCount: 0,
+          readCount: 0,
+          followUpCount: 0,
+          totalResponseTime: 0,
           deliveryRate: 0,
           readRate: 0,
           followUpRate: 0,
@@ -332,17 +461,56 @@ export const useRuleStore = create<RuleStoreState>((set, get) => ({
         };
       }
 
-      const latestPerf = rule.performance[rule.performance.length - 1];
+      const now = new Date();
+      const cutoffDate = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+      
+      const relevantPerf = rule.performance.filter(p => 
+        new Date(p.periodStart) >= cutoffDate
+      );
+
+      const agg = {
+        hitCount: 0,
+        deliveryCount: 0,
+        readCount: 0,
+        followUpCount: 0,
+        totalResponseTime: 0,
+      };
+
+      relevantPerf.forEach(p => {
+        agg.hitCount += p.hitCount;
+        agg.deliveryCount += p.deliveryCount;
+        agg.readCount += p.readCount;
+        agg.followUpCount += p.followUpCount;
+        agg.totalResponseTime += p.totalResponseTime || 0;
+      });
+
       return {
         ruleId,
         ruleName: rule.name,
-        hitCount: latestPerf?.hitCount || rule.hitCount,
-        deliveryRate: latestPerf && latestPerf.hitCount > 0 ? latestPerf.deliveryCount / latestPerf.hitCount : 0,
-        readRate: latestPerf && latestPerf.hitCount > 0 ? latestPerf.readCount / latestPerf.hitCount : 0,
-        followUpRate: latestPerf && latestPerf.hitCount > 0 ? latestPerf.followUpCount / latestPerf.hitCount : 0,
-        avgResponseTime: latestPerf?.avgResponseTime || 0,
+        hitCount: agg.hitCount,
+        deliveryCount: agg.deliveryCount,
+        readCount: agg.readCount,
+        followUpCount: agg.followUpCount,
+        totalResponseTime: agg.totalResponseTime,
+        deliveryRate: agg.hitCount > 0 ? agg.deliveryCount / agg.hitCount : 0,
+        readRate: agg.hitCount > 0 ? agg.readCount / agg.hitCount : 0,
+        followUpRate: agg.hitCount > 0 ? agg.followUpCount / agg.hitCount : 0,
+        avgResponseTime: agg.hitCount > 0 ? Math.round(agg.totalResponseTime / agg.hitCount) : 0,
       };
     });
+  },
+
+  getRuleComparison: (ruleIds, days = 7) => {
+    const stats = get().getRulePerformanceStats(ruleIds, days);
+    return stats.map(s => ({
+      ruleId: s.ruleId,
+      ruleName: s.ruleName,
+      hitCount: s.hitCount,
+      deliveryRate: s.deliveryRate,
+      readRate: s.readRate,
+      followUpRate: s.followUpRate,
+      avgResponseTime: s.avgResponseTime,
+    }));
   },
 
   clearHitEvents: () => {

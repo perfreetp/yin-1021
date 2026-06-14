@@ -17,10 +17,20 @@ export interface RulePerformance {
   deliveryCount: number;
   readCount: number;
   followUpCount: number;
+  totalResponseTime: number;
   avgResponseTime: number;
 }
 
-export type RuleHitEventType = 'matched' | 'skipped_priority' | 'skipped_dedup' | 'skipped_manual' | 'no_match' | 'restored_auto';
+export type RuleHitEventType = 
+  | 'matched' 
+  | 'skipped_priority' 
+  | 'skipped_dedup' 
+  | 'skipped_manual' 
+  | 'no_match' 
+  | 'restored_auto'
+  | 'manual_takeover'
+  | 'manual_message'
+  | 'guest_message';
 
 export interface RuleHitEvent {
   id: string;
@@ -39,6 +49,12 @@ export interface RuleHitEvent {
     hitExplanation: string;
   }[];
   dedupKey?: string;
+  channel?: string;
+  propertyId?: string;
+  propertyName?: string;
+  stayStage?: string;
+  messageContent?: string;
+  messageId?: string;
   timestamp: Date;
 }
 

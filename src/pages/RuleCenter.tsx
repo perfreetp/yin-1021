@@ -57,7 +57,7 @@ const nightTimeOptions = [
 ];
 
 const RuleCenter: React.FC = () => {
-  const { rules, addRule, updateRule, deleteRule, toggleRule, getRuleComparison } = useRuleStore();
+  const { rules, addRule, updateRule, deleteRule, toggleRule, getRuleComparison, getRulePerformanceStats } = useRuleStore();
   const { properties } = usePropertyStore();
   const { templates } = useTemplateStore();
 
@@ -66,6 +66,8 @@ const RuleCenter: React.FC = () => {
   const [expandedRuleId, setExpandedRuleId] = useState<string | null>(null);
   const [showComparisonModal, setShowComparisonModal] = useState(false);
   const [comparisonRuleIds, setComparisonRuleIds] = useState<string[]>([]);
+  const [comparisonDays, setComparisonDays] = useState<7 | 30>(7);
+  const [performanceDays, setPerformanceDays] = useState<7 | 30>(7);
 
   const [formData, setFormData] = useState({
     name: '',
@@ -203,8 +205,8 @@ const RuleCenter: React.FC = () => {
 
   const comparisonData = useMemo(() => {
     if (comparisonRuleIds.length === 0) return [];
-    return getRuleComparison(comparisonRuleIds);
-  }, [comparisonRuleIds, getRuleComparison]);
+    return getRuleComparison(comparisonRuleIds, comparisonDays);
+  }, [comparisonRuleIds, comparisonDays, getRuleComparison]);
 
   const toggleArrayItem = <T,>(array: T[], item: T): T[] => {
     return array.includes(item)
@@ -421,7 +423,27 @@ const RuleCenter: React.FC = () => {
                             <Eye className="w-4 h-4 text-purple-600 mt-0.5 shrink-0" />
                             <div className="flex-1">
                               <div className="flex items-center justify-between mb-2">
-                                <p className="text-sm font-medium text-gray-900">观察目标</p>
+                                <div className="flex items-center gap-2">
+                                  <p className="text-sm font-medium text-gray-900">观察目标</p>
+                                  <div className="flex gap-0.5 bg-purple-50 rounded-md p-0.5">
+                                    {[7, 30].map(days => (
+                                      <button
+                                        key={days}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setPerformanceDays(days as 7 | 30);
+                                        }}
+                                        className={`px-2 py-0.5 text-xs font-medium rounded transition-all ${
+                                          performanceDays === days
+                                            ? 'bg-white text-purple-700 shadow-sm'
+                                            : 'text-purple-500 hover:text-purple-700'
+                                        }`}
+                                      >
+                                        近{days}天
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
                                 <Button
                                   size="sm"
                                   variant="outline"
@@ -437,18 +459,25 @@ const RuleCenter: React.FC = () => {
                               {rule.observationTarget?.metrics && rule.observationTarget.metrics.length > 0 ? (
                                 <div className="grid grid-cols-4 gap-2">
                                   {rule.observationTarget.metrics.map(metric => {
-                                    const latestPerf = rule.performance?.[rule.performance.length - 1];
+                                    const perfStats = getRulePerformanceStats([rule.id], performanceDays)[0];
                                     const metricLabels: Record<string, string> = {
                                       deliveryRate: '送达率',
                                       readRate: '已读率',
                                       followUpRate: '追问率',
                                       responseTime: '平均响应',
                                     };
-                                    const value = latestPerf ? (
-                                      metric === 'responseTime'
-                                        ? `${latestPerf[metric]}s`
-                                        : `${(latestPerf[metric] * 100).toFixed(1)}%`
-                                    ) : '--';
+                                    let value = '--';
+                                    if (perfStats && perfStats.hitCount > 0) {
+                                      if (metric === 'responseTime') {
+                                        value = `${perfStats.avgResponseTime}s`;
+                                      } else if (metric === 'deliveryRate') {
+                                        value = `${(perfStats.deliveryRate * 100).toFixed(1)}%`;
+                                      } else if (metric === 'readRate') {
+                                        value = `${(perfStats.readRate * 100).toFixed(1)}%`;
+                                      } else if (metric === 'followUpRate') {
+                                        value = `${(perfStats.followUpRate * 100).toFixed(1)}%`;
+                                      }
+                                    }
                                     return (
                                       <div key={metric} className="bg-white p-2 rounded border border-gray-200">
                                         <div className="text-xs text-gray-500">{metricLabels[metric]}</div>
@@ -746,9 +775,25 @@ const RuleCenter: React.FC = () => {
           size="xl"
         >
           <div className="space-y-4">
-            <div>
-              <label className="block text-sm text-gray-700 mb-2">选择要对比的规则（2-4条）</label>
-              <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto p-3 bg-gray-50 rounded-lg">
+            <div className="flex items-center justify-between">
+              <label className="block text-sm text-gray-700">选择要对比的规则（2-4条）</label>
+              <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
+                {[7, 30].map(days => (
+                  <button
+                    key={days}
+                    onClick={() => setComparisonDays(days as 7 | 30)}
+                    className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${
+                      comparisonDays === days
+                        ? 'bg-white text-[#1e3a5f] shadow-sm'
+                        : 'text-gray-600 hover:text-gray-800'
+                    }`}
+                  >
+                    近{days}天
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto p-3 bg-gray-50 rounded-lg">
                 {rules.map(r => {
                   const isActive = comparisonRuleIds.includes(r.id);
                   return (
@@ -772,7 +817,6 @@ const RuleCenter: React.FC = () => {
                   );
                 })}
               </div>
-            </div>
 
             {comparisonData.length >= 2 && (
               <div className="overflow-x-auto">

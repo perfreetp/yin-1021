@@ -19,10 +19,12 @@ import {
   Moon,
   RefreshCw,
   MessageCircle,
+  MessageSquare,
   Target,
   Award,
   AlertCircle,
   ChevronRight,
+  ChevronDown,
   RotateCcw,
   Layers,
   History,
@@ -43,7 +45,7 @@ import { Avatar } from '@/components/ui/Avatar';
 import { Dropdown } from '@/components/ui/Dropdown';
 import { Modal } from '@/components/ui/Modal';
 import { MessageBubble } from '@/components/shared/MessageBubble';
-import { useConversationStore, SmartAutoReplyResult, ScenarioType } from '@/store/useConversationStore';
+import { useConversationStore, SmartAutoReplyResult, ScenarioType, DedupTestDimension, DedupTestResult, DedupTestItemResult } from '@/store/useConversationStore';
 import { useTemplateStore } from '@/store/useTemplateStore';
 import { usePropertyStore } from '@/store/usePropertyStore';
 import { useRuleStore } from '@/store/useRuleStore';
@@ -74,6 +76,8 @@ const Conversations: React.FC = () => {
     getConversationsByGuestId,
     lastAutoReplyResult,
     simulateScenario,
+    generateDedupTestItems,
+    runDedupTest,
   } = useConversationStore();
   const { templates, getTemplatesByCategory } = useTemplateStore();
   const { properties, getPropertyById } = usePropertyStore();
@@ -109,6 +113,10 @@ const Conversations: React.FC = () => {
     asGuest: false,
   });
   const [autoReplyToast, setAutoReplyToast] = useState<{ show: boolean; message: string; type: 'success' | 'warning' | 'info'; result?: SmartAutoReplyResult }>({ show: false, message: '', type: 'success' });
+  const [showDedupTestModal, setShowDedupTestModal] = useState(false);
+  const [dedupTestDimension, setDedupTestDimension] = useState<DedupTestDimension>('by_guest');
+  const [dedupTestResult, setDedupTestResult] = useState<DedupTestResult | null>(null);
+  const [dedupTestGroupKey, setDedupTestGroupKey] = useState<string>('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const selectedConversation = conversations.find(c => c.id === selectedConversationId);
@@ -382,6 +390,17 @@ const Conversations: React.FC = () => {
                   onClick={() => setShowNewInquiryModal(true)}
                 >
                   模拟咨询
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  leftIcon={<Shield className="w-4 h-4" />}
+                  onClick={() => {
+                    setShowDedupTestModal(true);
+                    setDedupTestResult(null);
+                  }}
+                >
+                  去重验收
                 </Button>
                 <Dropdown
                   options={[
@@ -913,6 +932,208 @@ const Conversations: React.FC = () => {
       </Modal>
 
       <Modal
+        isOpen={showDedupTestModal}
+        onClose={() => setShowDedupTestModal(false)}
+        title="去重验收工具"
+        size="xl"
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-gray-500">批量测试去重规则，按不同维度查看放行/拦截情况</p>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">测试口径</label>
+            <div className="flex gap-2">
+              {[
+                { value: 'by_guest', label: '按客人' },
+                { value: 'by_channel', label: '按渠道' },
+                { value: 'by_stage', label: '按入住阶段' },
+              ].map(opt => (
+                <button
+                  key={opt.value}
+                  onClick={() => {
+                    setDedupTestDimension(opt.value as DedupTestDimension);
+                    setDedupTestResult(null);
+                  }}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                    dedupTestDimension === opt.value
+                      ? 'bg-[#1e3a5f] text-white'
+                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="p-3 bg-blue-50 rounded-lg border border-blue-200">
+            <p className="text-sm text-blue-700">
+              <span className="font-medium">说明：</span>
+              {dedupTestDimension === 'by_guest' && '同一客人跨渠道/跨阶段发送，验证去重是否按客人维度生效'}
+              {dedupTestDimension === 'by_channel' && '同一渠道下不同客人/不同阶段发送，验证渠道维度的去重表现'}
+              {dedupTestDimension === 'by_stage' && '同一入住阶段下不同客人/不同渠道发送，验证阶段维度的去重表现'}
+            </p>
+          </div>
+
+          {!dedupTestResult ? (
+            <div className="flex justify-center py-8">
+              <Button
+                onClick={() => {
+                  const items = generateDedupTestItems(dedupTestDimension);
+                  const result = runDedupTest(items);
+                  setDedupTestResult(result);
+                }}
+                leftIcon={<Play className="w-4 h-4" />}
+              >
+                开始验收测试
+              </Button>
+            </div>
+          ) : (
+            <>
+              <div className="grid grid-cols-4 gap-3">
+                <div className="p-4 bg-gray-50 rounded-lg text-center">
+                  <p className="text-2xl font-bold text-gray-900">{dedupTestResult.totalCount}</p>
+                  <p className="text-sm text-gray-500 mt-1">总消息数</p>
+                </div>
+                <div className="p-4 bg-emerald-50 rounded-lg text-center">
+                  <p className="text-2xl font-bold text-emerald-600">{dedupTestResult.passedCount}</p>
+                  <p className="text-sm text-gray-500 mt-1">放行</p>
+                </div>
+                <div className="p-4 bg-amber-50 rounded-lg text-center">
+                  <p className="text-2xl font-bold text-amber-600">{dedupTestResult.blockedCount}</p>
+                  <p className="text-sm text-gray-500 mt-1">拦截</p>
+                </div>
+                <div className="p-4 bg-gray-50 rounded-lg text-center">
+                  <p className="text-2xl font-bold text-gray-500">{dedupTestResult.noMatchCount}</p>
+                  <p className="text-sm text-gray-500 mt-1">未命中</p>
+                </div>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-sm font-medium text-gray-700">详细结果</h3>
+                  <span className="text-xs text-gray-400">
+                    按{dedupTestDimension === 'by_guest' ? '客人' : dedupTestDimension === 'by_channel' ? '渠道' : '阶段'}分组
+                  </span>
+                </div>
+                <div className="border border-gray-200 rounded-lg overflow-hidden max-h-96 overflow-y-auto">
+                  {Object.entries(
+                    dedupTestResult.items.reduce<Record<string, DedupTestItemResult[]>>((acc, item) => {
+                      let key: string;
+                      if (dedupTestDimension === 'by_guest') {
+                        key = item.guestName;
+                      } else if (dedupTestDimension === 'by_channel') {
+                        key = item.channel;
+                      } else {
+                        key = item.stayStage;
+                      }
+                      if (!acc[key]) acc[key] = [];
+                      acc[key].push(item);
+                      return acc;
+                    }, {})
+                  ).map(([groupKey, items]) => {
+                    const groupPassed = items.filter(i => i.passed).length;
+                    const groupBlocked = items.filter(i => i.blocked).length;
+                    const isExpanded = dedupTestGroupKey === groupKey;
+                    return (
+                      <div key={groupKey} className="border-b border-gray-200 last:border-b-0">
+                        <button
+                          onClick={() => setDedupTestGroupKey(isExpanded ? '' : groupKey)}
+                          className="w-full px-4 py-3 flex items-center justify-between hover:bg-gray-50 transition-colors"
+                        >
+                          <div className="flex items-center gap-3">
+                            <ChevronDown
+                              className={`w-4 h-4 text-gray-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
+                            />
+                            <span className="font-medium text-gray-900">{groupKey}</span>
+                            <span className="text-sm text-gray-400">共{items.length}条</span>
+                          </div>
+                          <div className="flex items-center gap-3 text-sm">
+                            <span className="text-emerald-600">放行 {groupPassed}</span>
+                            <span className="text-amber-600">拦截 {groupBlocked}</span>
+                          </div>
+                        </button>
+                        {isExpanded && (
+                          <div className="border-t border-gray-100">
+                            {items.map((item, idx) => (
+                              <div
+                                key={item.id}
+                                className="px-4 py-3 border-b border-gray-50 last:border-b-0 hover:bg-gray-50"
+                              >
+                                <div className="flex items-start justify-between gap-4">
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-sm text-gray-900 truncate">{item.content}</p>
+                                    <div className="flex items-center gap-2 mt-1 text-xs text-gray-400">
+                                      <span>{item.propertyName}</span>
+                                      <span>·</span>
+                                      <span>{item.stayStage}</span>
+                                      <span>·</span>
+                                      <span>{item.channel}</span>
+                                    </div>
+                                  </div>
+                                  <div className="flex-shrink-0">
+                                    {item.passed && (
+                                      <Badge variant="success">
+                                        <CheckCircle className="w-3 h-3 mr-1" />
+                                        放行
+                                      </Badge>
+                                    )}
+                                    {item.blocked && (
+                                      <Badge variant="warning">
+                                        <Shield className="w-3 h-3 mr-1" />
+                                        拦截
+                                      </Badge>
+                                    )}
+                                    {!item.passed && !item.blocked && (
+                                      <Badge variant="info">
+                                        <AlertCircle className="w-3 h-3 mr-1" />
+                                        未命中
+                                      </Badge>
+                                    )}
+                                  </div>
+                                </div>
+                                {item.reason && (
+                                  <p className="text-xs text-gray-500 mt-2 pl-0">{item.reason}</p>
+                                )}
+                                {item.ruleName && (
+                                  <p className="text-xs text-blue-600 mt-1">命中规则：{item.ruleName}</p>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="flex justify-between items-center pt-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setDedupTestResult(null);
+                  }}
+                  leftIcon={<RefreshCw className="w-4 h-4" />}
+                >
+                  重新测试
+                </Button>
+                <div className="text-xs text-gray-400">
+                  测试ID：{dedupTestResult.testId}
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+        <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-gray-100">
+          <Button variant="outline" onClick={() => setShowDedupTestModal(false)}>
+            关闭
+          </Button>
+        </div>
+      </Modal>
+
+      <Modal
         isOpen={followUpData.show}
         onClose={() => setFollowUpData({ show: false, conversationId: '', content: '', asGuest: false })}
         title={followUpData.asGuest ? '模拟客人回复' : '模拟客人追问'}
@@ -1114,6 +1335,24 @@ const eventTypeConfig: Record<RuleHitEventType, {
     iconColor: 'text-blue-600',
     label: '人工接管',
   },
+  manual_takeover: {
+    icon: <User className="w-4 h-4" />,
+    bgColor: 'bg-indigo-100',
+    iconColor: 'text-indigo-600',
+    label: '人工接管',
+  },
+  manual_message: {
+    icon: <MessageSquare className="w-4 h-4" />,
+    bgColor: 'bg-sky-100',
+    iconColor: 'text-sky-600',
+    label: '人工回复',
+  },
+  guest_message: {
+    icon: <User className="w-4 h-4" />,
+    bgColor: 'bg-orange-100',
+    iconColor: 'text-orange-600',
+    label: '客人消息',
+  },
   no_match: {
     icon: <XCircle className="w-4 h-4" />,
     bgColor: 'bg-gray-100',
@@ -1128,7 +1367,25 @@ const eventTypeConfig: Record<RuleHitEventType, {
   },
 };
 
+const channelLabels: Record<string, string> = {
+  airbnb: 'Airbnb',
+  xiaohongshu: '小红书',
+  douyin: '抖音',
+  wechat: '微信',
+  booking: 'Booking.com',
+};
+
+const stageLabels: Record<string, string> = {
+  inquiry: '咨询中',
+  pre_checkin: '入住前',
+  during_stay: '入住中',
+  post_checkout: '退房后',
+};
+
 const HitTimeline: React.FC<{ events: RuleHitEvent[] }> = ({ events }) => {
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const { properties } = usePropertyStore();
+
   if (events.length === 0) {
     return (
       <div className="text-center py-8 text-gray-400">
@@ -1143,58 +1400,119 @@ const HitTimeline: React.FC<{ events: RuleHitEvent[] }> = ({ events }) => {
     (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
   );
 
+  const getPropertyName = (propertyId?: string) => {
+    if (!propertyId) return '';
+    const prop = properties.find(p => p.id === propertyId);
+    return prop?.name || propertyId;
+  };
+
+  const hasDetails = (event: RuleHitEvent) => {
+    return !!(event.channel || event.propertyId || event.stayStage || event.messageContent || event.reasons.length > 2);
+  };
+
   return (
-    <div className="space-y-3">
+    <div className="space-y-2">
       {sortedEvents.map((event, idx) => {
         const config = eventTypeConfig[event.eventType];
         const isLast = idx === sortedEvents.length - 1;
+        const isExpanded = expandedId === event.id;
         return (
           <div key={event.id} className="relative flex gap-3">
             {!isLast && (
               <div className="absolute left-4 top-8 bottom-0 w-0.5 bg-gray-200" />
             )}
-            <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${config.bgColor}`}>
+            <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${config.bgColor} z-10`}>
               <span className={config.iconColor}>{config.icon}</span>
             </div>
             <div className="flex-1 min-w-0">
-              <div className="flex items-center justify-between gap-2">
-                <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${config.bgColor} ${config.iconColor}`}>
-                  {config.label}
-                </span>
-                <span className="text-xs text-gray-400">
-                  {formatRelative(new Date(event.timestamp))}
-                </span>
-              </div>
-              {event.ruleName && (
-                <div className="text-sm font-medium text-gray-900 mt-1">
-                  {event.ruleName}
-                  {event.priority !== undefined && (
-                    <span className="text-xs text-gray-500 ml-1">(P{event.priority})</span>
-                  )}
+              <div 
+                className={`p-2 rounded-lg hover:bg-gray-50 cursor-pointer transition-colors ${isExpanded ? 'bg-gray-50' : ''}`}
+                onClick={() => hasDetails(event) && setExpandedId(isExpanded ? null : event.id)}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${config.bgColor} ${config.iconColor}`}>
+                      {config.label}
+                    </span>
+                    {hasDetails(event) && (
+                      <ChevronDown className={`w-3 h-3 text-gray-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                    )}
+                  </div>
+                  <span className="text-xs text-gray-400">
+                    {formatRelative(new Date(event.timestamp))}
+                  </span>
                 </div>
-              )}
-              {event.hitExplanation && (
-                <div className="text-xs text-gray-600 mt-0.5">
-                  {event.hitExplanation}
+                {event.ruleName && (
+                  <div className="text-sm font-medium text-gray-900 mt-1">
+                    {event.ruleName}
+                    {event.priority !== undefined && (
+                      <span className="text-xs text-gray-500 ml-1">(P{event.priority})</span>
+                    )}
+                  </div>
+                )}
+                {event.hitExplanation && (
+                  <div className="text-xs text-gray-600 mt-0.5">
+                    {event.hitExplanation}
+                  </div>
+                )}
+                {event.messageContent && event.eventType === 'manual_message' && (
+                  <div className="text-xs text-gray-600 mt-1 bg-sky-50 p-2 rounded border border-sky-100">
+                    {event.messageContent}
+                  </div>
+                )}
+                {event.messageContent && event.eventType === 'guest_message' && (
+                  <div className="text-xs text-gray-600 mt-1 bg-orange-50 p-2 rounded border border-orange-100">
+                    {event.messageContent}
+                  </div>
+                )}
+                {event.reasons.length > 0 && (
+                  <div className="mt-1 space-y-0.5">
+                    {event.reasons.slice(0, isExpanded ? undefined : 2).map((reason, ridx) => (
+                      <div key={ridx} className="text-xs text-gray-500 flex items-start gap-1">
+                        <span className="text-gray-400 mt-0.5">•</span>
+                        <span className="break-all">{reason}</span>
+                      </div>
+                    ))}
+                    {!isExpanded && event.reasons.length > 2 && (
+                      <div className="text-xs text-gray-400">
+                        还有 {event.reasons.length - 2} 条原因，点击展开
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {isExpanded && (
+                  <div className="mt-2 pt-2 border-t border-gray-200 space-y-1.5">
+                    {event.channel && (
+                      <div className="flex items-center gap-2 text-xs">
+                        <span className="text-gray-400 w-16">渠道:</span>
+                        <span className="text-gray-700 font-medium">{channelLabels[event.channel] || event.channel}</span>
+                      </div>
+                    )}
+                    {event.propertyId && (
+                      <div className="flex items-center gap-2 text-xs">
+                        <span className="text-gray-400 w-16">房源:</span>
+                        <span className="text-gray-700 font-medium">{getPropertyName(event.propertyId)}</span>
+                      </div>
+                    )}
+                    {event.stayStage && (
+                      <div className="flex items-center gap-2 text-xs">
+                        <span className="text-gray-400 w-16">阶段:</span>
+                        <span className="text-gray-700 font-medium">{stageLabels[event.stayStage] || event.stayStage}</span>
+                      </div>
+                    )}
+                    {event.dedupKey && (
+                      <div className="flex items-center gap-2 text-xs">
+                        <span className="text-gray-400 w-16">去重Key:</span>
+                        <span className="text-gray-700 font-mono text-[11px]">{event.dedupKey}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div className="text-xs text-gray-400 mt-1">
+                  {formatDateTime(new Date(event.timestamp))}
                 </div>
-              )}
-              {event.reasons.length > 0 && (
-                <div className="mt-1 space-y-0.5">
-                  {event.reasons.slice(0, 2).map((reason, ridx) => (
-                    <div key={ridx} className="text-xs text-gray-500 flex items-start gap-1">
-                      <span className="text-gray-400 mt-0.5">•</span>
-                      <span>{reason}</span>
-                    </div>
-                  ))}
-                  {event.reasons.length > 2 && (
-                    <div className="text-xs text-gray-400">
-                      还有 {event.reasons.length - 2} 条...
-                    </div>
-                  )}
-                </div>
-              )}
-              <div className="text-xs text-gray-400 mt-1">
-                {formatDateTime(new Date(event.timestamp))}
               </div>
             </div>
           </div>

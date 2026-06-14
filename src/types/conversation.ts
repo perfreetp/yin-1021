@@ -30,6 +30,7 @@ export interface Message {
   senderType: SenderType;
   content: string;
   templateId?: string;
+  ruleId?: string;
   status: MessageStatus;
   sentAt: Date;
   deliveredAt?: Date;
